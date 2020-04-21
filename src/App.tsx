@@ -1,10 +1,11 @@
-import './App.css'
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useRef} from 'react';
 import MonacoEditor from "react-monaco-editor";
 import * as monacoEditor from 'monaco-editor';
-import {useSelector} from "react-redux";
+import {useDispatch, useSelector} from "react-redux";
 import {RootState} from "./modules";
-import {Entity} from "./modules/entities";
+import {Entity, selectEntity} from "./modules/entities";
+import {EntityEditor} from "./components/EntityEditor";
+import {selectContent, updateContent} from "./modules/content";
 
 // git file dir
 // characters/{Name}.md
@@ -25,12 +26,19 @@ function useKeyEntities() {
 }
 
 function App() {
-    const {content} = useSelector((state: RootState) => state.content)
+    const dispatch = useDispatch()
+    const {content, selectedContent} = useSelector((state: RootState) => {
+        const {content, selectedContentId} = state.content
+        const selectedContent = state.content.content.find(c => c.id === selectedContentId)
+
+        return {
+            selectedContent,
+            content
+        }
+    })
+
     const {entities} = useSelector((state: RootState) => state.entities)
     const keyEntities = useKeyEntities()
-
-    const [value, setValue] = useState('')
-    const [isPressingDown, setIsPressingDown] = useState(false)
     const monacoRef = useRef<typeof monacoEditor>()
     const ref = useRef<MonacoEditor>(null)
 
@@ -42,7 +50,7 @@ function App() {
         return (
             <div>
                 {entities.map(entity => {
-                    return <div key={entity.name}>{entity.name}</div>
+                    return <div onClick={() => dispatch(selectEntity(entity.id))} key={entity.name}>{entity.name}</div>
                 })}
             </div>
         )
@@ -52,7 +60,7 @@ function App() {
         return (
             <div>
                 {content.map(cont => {
-                    return <div onClick={() => setValue(cont.text)} key={cont.name}>{cont.name}</div>
+                    return <div onClick={() => dispatch(selectContent(cont.id))} key={cont.id}>{cont.name}</div>
                 })}
             </div>
         )
@@ -127,110 +135,97 @@ function App() {
     }, [keyEntities])
 
     useEffect(() => {
-        ref?.current?.editor?.focus()
-    }, [entities])
+        const providerMap = keyEntities.map(entity => {
+            const commandId = ref?.current?.editor?.addCommand(0, function () {
+                dispatch(selectEntity(entity.id))
+            }, '');
 
-    useEffect(() => {
-        const providerMap = keyEntities
-            .map(entity => {
-                const lib = `Go to ${entity.name}`
-                const uri = monacoRef?.current?.Uri.file(`${entity.name}.md`);
-                const model = monacoRef?.current?.editor.createModel(lib, "markdown", uri);
+            const provider = monacoRef?.current?.languages.registerCodeLensProvider('markdown', {
+                provideCodeLenses: function (model, token) {
+                    const matches = model
+                        .findMatches(
+                            entity.name,
+                            true,
+                            false,
+                            true,
+                            null,
+                            true,
+                        )
+                        .reduce((acc, current) => {
+                            const dupe = acc.find(item => item.range.startLineNumber === current.range.startLineNumber);
 
-                const provider = monacoRef?.current?.languages.registerDefinitionProvider('markdown', {
-                    provideDefinition(model, position, token) {
-                        // @ts-ignore
-                        const matches = model.findMatches(entity.name)
-
-                        // @ts-ignore
-                        return matches.map(m => {
-                            return {
-                                uri,
-                                // @ts-ignore
-                                range: m.range
+                            if (!dupe) {
+                                return acc.concat([current]);
                             }
-                        })
-                    }
-                })
 
-                return {
-                    model, provider
+                            return acc;
+                        }, [] as monacoEditor.editor.FindMatch[]);
+
+                    const lenses: monacoEditor.languages.CodeLens[] = matches.map((match) => {
+                        return {
+                            range: match.range,
+                            command: {
+                                id: commandId ?? '',
+                                title: `@${entity.name}`
+                            }
+                        }
+                    })
+
+                    return {
+                        dispose: () => {
+                        },
+                        lenses
+                    };
                 }
-            })
+            });
+
+            return {provider}
+        })
 
         return () => {
             providerMap.forEach(provider => {
-                provider.model?.dispose()
                 provider.provider?.dispose()
             })
         }
-    }, [value, keyEntities])
-
-    useEffect(() => {
-        const editor = ref?.current?.editor
-
-        const keyDown = editor?.onKeyDown(e => {
-            if (e.keyCode === 57) {
-                setIsPressingDown(true)
-            }
-        })
-
-        const keyUp = editor?.onKeyUp(e => {
-            if (e.keyCode === 57) {
-                setIsPressingDown(false)
-            }
-        })
-
-        const mouseDownListeners = keyEntities.map(entity => {
-            return editor?.onMouseDown(function (e) {
-                if (isPressingDown) {
-                    if (e.target.element?.textContent === entity.name) {
-                        console.log('weve got a match baby', 'fire an event')
-                    }
-                }
-            });
-        })
-
-        return () => {
-            keyDown?.dispose()
-            keyUp?.dispose()
-            mouseDownListeners.forEach(listener => listener?.dispose())
-        }
-    }, [isPressingDown, keyEntities])
+    }, [dispatch, keyEntities])
 
     return (
         <div>
-            <button onClick={() => {
-                setIsPressingDown(false)
-                setValue(v => v.replace(new RegExp('Kubo', 'g'), "Greg"))
-            }}>
-                Update chars
-            </button>
             <div style={{display: 'flex'}}>
-                <Directory/>
-                <MonacoEditor
-                    ref={ref}
-                    onChange={(newValue, e) => {
-                        setValue(newValue)
-                    }}
-                    value={value}
-                    width="800"
-                    height="600"
-                    language="markdown"
-                    theme="vs-dark"
-                    editorWillMount={editorWillMount}
-                    options={{
-                        contextmenu: false,
-                        gotoLocation: {
-                            multiple: "goto",
-                            multipleDeclarations: "goto",
-                            multipleDefinitions: "goto",
-                            multipleImplementations: "goto",
-                            multipleReferences: "goto",
-                            multipleTypeDefinitions: "goto"
-                        }
-                    }}
-                />
+                <div style={{flex: 1}}>
+                    <Directory/>
+                </div>
+                <div style={{flex: 2}}>
+                    <MonacoEditor
+                        onChange={(text) => {
+                            if (selectedContent) {
+                                dispatch(updateContent({
+                                    ...selectedContent,
+                                    text
+                                }))
+                            }
+                        }}
+                        ref={ref}
+                        value={selectedContent?.text ?? ''}
+                        language="markdown"
+                        theme="vs-dark"
+                        editorWillMount={editorWillMount}
+                        options={{
+                            contextmenu: false,
+                            gotoLocation: {
+                                multiple: "goto",
+                                multipleDeclarations: "goto",
+                                multipleDefinitions: "goto",
+                                multipleImplementations: "goto",
+                                multipleReferences: "goto",
+                                multipleTypeDefinitions: "goto"
+                            }
+                        }}
+                    />
+                </div>
+                <div style={{flex: 1.5}}>
+                    <EntityEditor/>
+                </div>
             </div>
         </div>
     );
