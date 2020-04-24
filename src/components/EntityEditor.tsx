@@ -3,19 +3,25 @@ import {useDispatch, useSelector} from "react-redux";
 import {RootState} from "../modules";
 import {Descriptor, Entity, selectEntity, Traits, updateEntity} from "../modules/entities";
 import {findAndReplace} from "../modules/content";
+import {Card, Collapse, Button, Tag, Input} from "antd";
+import {ChangeEvent, useState} from "react";
+import {
+    EditOutlined,
+    CheckOutlined
+} from '@ant-design/icons';
 
-function findEntity(id: number, entities: Entity[]): Entity | undefined {
+function findEntity(id: string, entities: Entity[]): Entity | undefined {
     for (let i = 0; i < entities.length; i++) {
         const entity = entities[i]
 
-        if (entity.id === id) {
+        if (entity._id === id) {
             return entity
         }
 
         if (entity.entities.length > 0) {
             const nestedEntity = findEntity(id, entity.entities)
 
-            if (nestedEntity?.id === id) {
+            if (nestedEntity?._id === id) {
                 return nestedEntity
             }
         }
@@ -43,13 +49,6 @@ interface EditEntityProps {
     entity: Entity
 }
 
-
-function getFlatEntityMap(entities: Entity[]): Entity[] {
-    return entities.reduce((acc, current) => {
-        return acc.concat(current, getFlatEntityMap(current.entities))
-    }, [] as Entity[])
-}
-
 function areTraits(descriptor: any): descriptor is Traits {
     return Array.isArray(descriptor)
 }
@@ -67,13 +66,13 @@ function Description(props: DescriptionProps) {
 
     if (areTraits(description)) {
         return (
-            <ul>
+            <div>
                 {description.map(trait => {
                     return (
-                        <li key={trait}>{trait}</li>
+                        <Tag key={trait}>{trait}</Tag>
                     )
                 })}
-            </ul>
+            </div>
         )
     }
 
@@ -84,35 +83,78 @@ function Description(props: DescriptionProps) {
     return null
 }
 
+interface EditableProps {
+    value?: string
+    onSave?: (value: string) => void
+}
+
+function Editable(props: EditableProps) {
+    const [showEdit, setShowEdit] = useState(false)
+    const [isEditing, setIsEditing] = useState(false)
+    const [value, setValue] = useState(props.value || '')
+
+    function onSave(e: React.MouseEvent) {
+        e.stopPropagation()
+        props.onSave && props.onSave(value)
+        setIsEditing(false)
+    }
+
+    function onEdit(e: React.MouseEvent) {
+        e.stopPropagation()
+        setIsEditing(true)
+    }
+
+    if (isEditing) {
+        return (
+            <div style={{display: 'flex'}}>
+                <Input onClick={e => e.stopPropagation()} value={value}
+                       onChange={(e: ChangeEvent<HTMLInputElement>) => setValue(e.target.value)}
+                       placeholder="Property here"/>
+                <Button type={'link'} shape={'circle'} size={"small"} icon={<CheckOutlined/>} onClick={onSave}/>
+            </div>
+        )
+    }
+
+    return (
+        <div onMouseOver={() => setShowEdit(true)} onMouseLeave={() => setShowEdit(false)} style={{display: 'flex'}}>
+            <h3>{value}</h3>
+            {showEdit &&
+            <Button type={'link'} shape={'circle'} size={"small"} icon={<EditOutlined/>} onClick={onEdit}/>}
+        </div>
+    )
+
+}
+
 function EditEntity(props: EditEntityProps) {
     const {entity} = props
     const dispatch = useDispatch()
-    const flatEntityMap = getFlatEntityMap(entity.entities)
+
+    function onSaveEntity(value: string) {
+        dispatch(updateEntity({
+            ...entity,
+            name: value
+        }))
+
+        if (value.length > 0) {
+            dispatch(findAndReplace([entity.name, value]))
+        }
+    }
 
     return (
-        <div>
-            <h2>{entity.name}</h2>
-            <h3>{entity.descriptor}</h3>
-            <button onClick={() => console.log('edit')}>Edit</button>
-            {
-                flatEntityMap.map((entity, index) => {
-                    return (
-                        <div key={entity.id}
-                             style={{padding: '1rem', margin: '1rem', border: '1px solid black'}}>
-                            <h4>{entity.name}</h4>
-                            <input value={entity.name} onChange={(e) => {
-                                dispatch(updateEntity({
-                                    ...entity,
-                                    name: e.target.value
-                                }))
-                                dispatch(findAndReplace([entity.name, e.target.value]))
-                            }}/>
-                            <Description description={entity.descriptor}/>
-                            <button onClick={() => dispatch(selectEntity(entity.id))}>Select</button>
-                        </div>
-                    )
-                })
-            }
-        </div>
+        <Collapse bordered={false}>
+            <Collapse.Panel
+                key={entity._id}
+                header={<Editable value={entity.name} onSave={onSaveEntity}/>}
+            >
+                <Description description={entity.descriptor}/>
+                {
+                    entity.entities.map((entity, index) => {
+                        return (
+                            <EditEntity key={entity._id} entity={entity}/>
+                        )
+                    })
+                }
+            </Collapse.Panel>
+        </Collapse>
     )
 }

@@ -1,15 +1,22 @@
-import React, {useEffect, useRef} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import MonacoEditor from "react-monaco-editor";
 import * as monacoEditor from 'monaco-editor';
 import {useDispatch, useSelector} from "react-redux";
 import {RootState} from "./modules";
-import {Entity, selectEntity} from "./modules/entities";
+import {
+    Entity, entityDocuments,
+    selectEntity, setEntityStore,
+} from "./modules/entities";
 import {EntityEditor} from "./components/EntityEditor";
-import {selectContent, updateContent} from "./modules/content";
-
-// git file dir
-// characters/{Name}.md
-// chapters/{Chapter}.md
+import {
+    Content,
+    contentFixture,
+    selectContent, setContentStore,
+    updateContent
+} from "./modules/content";
+import {Button, Menu} from "antd";
+import {db, flatToHierarchy} from "./index";
+import {useDebounce} from "use-debounce";
 
 function useKeyEntities() {
     const {entities} = useSelector((state: RootState) => state.entities)
@@ -29,53 +36,83 @@ function App() {
     const dispatch = useDispatch()
     const {content, selectedContent} = useSelector((state: RootState) => {
         const {content, selectedContentId} = state.content
-        const selectedContent = state.content.content.find(c => c.id === selectedContentId)
+        const selectedContent = state.content.content.find(c => c._id === selectedContentId)
 
         return {
             selectedContent,
             content
         }
     })
-
     const {entities} = useSelector((state: RootState) => state.entities)
+    const valueFromSelected = selectedContent?.text ?? ''
+    const [value, setValue] = useState(valueFromSelected)
+    const [text] = useDebounce(value, 1000);
     const keyEntities = useKeyEntities()
     const monacoRef = useRef<typeof monacoEditor>()
     const ref = useRef<MonacoEditor>(null)
+
+    useEffect(() => {
+        if (selectedContent) {
+            if (selectedContent.text !== text) {
+                dispatch(updateContent({
+                    ...selectedContent,
+                    text
+                }))
+            }
+        }
+    }, [text])
+
+    useEffect(() => {
+        setValue(valueFromSelected)
+    }, [valueFromSelected])
 
     function editorWillMount(monaco: typeof monacoEditor) {
         monacoRef.current = monaco
     }
 
-    function EntityDirectory() {
-        return (
-            <div>
-                {entities.map(entity => {
-                    return <div onClick={() => dispatch(selectEntity(entity.id))} key={entity.name}>{entity.name}</div>
-                })}
-            </div>
-        )
-    }
+    React.useEffect(() => {
+        db.bulkDocs([...entityDocuments, ...contentFixture])
+            .catch(e => (e))
+            .finally(() => {
+                db.allDocs({include_docs: true}).then(docs => {
+                    const entities = docs.rows.filter(row => {
+                        // @ts-ignore
+                        return row.doc.type === 'entity'
+                    })
+                        .map(row => row.doc)
 
-    function ContentDirectory() {
-        return (
-            <div>
-                {content.map(cont => {
-                    return <div onClick={() => dispatch(selectContent(cont.id))} key={cont.id}>{cont.name}</div>
-                })}
-            </div>
-        )
-    }
+                    // @ts-ignore
+                    const content: Content[] = docs.rows.filter(row => row.doc.type === 'content').map(row => row.doc)
+
+                    dispatch(setEntityStore({
+                        // @ts-ignore
+                        entities: flatToHierarchy(entities)
+                    }))
+                    dispatch(setContentStore({
+                        // @ts-ignore
+                        content
+                    }))
+                })
+            })
+    }, [])
 
     function Directory() {
         return (
-            <div>
-                <div style={{padding: '1rem', border: '1px solid red'}}>
-                    <EntityDirectory/>
-                </div>
-                <div style={{padding: '1rem', border: '1px solid blue'}}>
-                    <ContentDirectory/>
-                </div>
-            </div>
+            <Menu selectedKeys={selectedContent ? [selectedContent._id.toString()] : []} mode={'inline'}>
+                <Menu.ItemGroup title={'Entities'}>
+                    {entities.map(entity => {
+                        return <Menu.Item onClick={() => dispatch(selectEntity(entity._id))}
+                                          key={entity.name}>{entity.name}</Menu.Item>
+                    })}
+                </Menu.ItemGroup>
+                <Menu.ItemGroup title={'My Workbook'}>
+                    {content.map(cont => {
+                        return <Menu.Item onClick={() => dispatch(selectContent(cont._id))}
+                                          key={cont._id}>{cont.name}</Menu.Item>
+                    })}
+                    <Menu.Item><Button type={'primary'}>Add New</Button></Menu.Item>
+                </Menu.ItemGroup>
+            </Menu>
         )
     }
 
@@ -137,7 +174,7 @@ function App() {
     useEffect(() => {
         const providerMap = keyEntities.map(entity => {
             const commandId = ref?.current?.editor?.addCommand(0, function () {
-                dispatch(selectEntity(entity.id))
+                dispatch(selectEntity(entity._id))
             }, '');
 
             const provider = monacoRef?.current?.languages.registerCodeLensProvider('markdown', {
@@ -190,23 +227,20 @@ function App() {
     }, [dispatch, keyEntities])
 
     return (
-        <div>
-            <div style={{display: 'flex'}}>
-                <div style={{flex: 1}}>
+        <div style={{height: '100%'}}>
+            <div style={{height: '100%', display: 'flex', paddingTop: '1rem', paddingBottom: '1rem'}}>
+                <div style={{flex: 1, paddingLeft: '1rem', paddingRight: '1rem'}}>
                     <Directory/>
                 </div>
                 <div style={{flex: 2}}>
                     <MonacoEditor
                         onChange={(text) => {
                             if (selectedContent) {
-                                dispatch(updateContent({
-                                    ...selectedContent,
-                                    text
-                                }))
+                                setValue(text)
                             }
                         }}
                         ref={ref}
-                        value={selectedContent?.text ?? ''}
+                        value={value}
                         language="markdown"
                         theme="vs-dark"
                         editorWillMount={editorWillMount}
@@ -223,7 +257,7 @@ function App() {
                         }}
                     />
                 </div>
-                <div style={{flex: 1.5}}>
+                <div style={{flex: 1.5, paddingLeft: '1rem', paddingRight: '1rem'}}>
                     <EntityEditor/>
                 </div>
             </div>

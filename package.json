@@ -3,13 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@ant-design/icons": "^4.0.6",
     "@testing-library/jest-dom": "^4.2.4",
     "@testing-library/react": "^9.3.2",
     "@testing-library/user-event": "^7.1.2",
+    "@types/debounce": "^1.2.0",
     "@types/jest": "^24.0.0",
     "@types/node": "^12.0.0",
     "@types/react": "^16.9.0",
     "@types/react-dom": "^16.9.0",
+    "antd": "^4.1.4",
+    "babel-plugin-import": "^1.13.0",
+    "debounce": "^1.2.0",
+    "debounce-promise": "^3.1.2",
+    "pouchdb": "^7.2.1",
+    "pouchdb-find": "^7.2.1",
     "react": "^16.13.1",
     "react-dom": "^16.13.1",
     "react-monaco-editor": "^0.36.0",
@@ -17,8 +25,10 @@
     "react-scripts": "3.4.1",
     "redux": "^4.0.5",
     "redux-thunk": "^2.3.0",
+    "relational-pouch": "^4.0.0",
     "typescript": "~3.7.2",
-    "use-debounce": "^3.4.1"
+    "use-debounce": "^3.4.1",
+    "uuid": "^7.0.3"
   },
   "scripts": {
     "start": "react-app-rewired start",
@@ -42,7 +52,10 @@
     ]
   },
   "devDependencies": {
+    "@types/debounce-promise": "^3.1.1",
+    "@types/pouchdb": "^6.4.0",
     "@types/react-redux": "^7.1.7",
+    "@types/uuid": "^7.0.3",
     "customize-cra": "^0.9.1",
     "monaco-editor": "^0.20.0",
     "monaco-editor-webpack-plugin": "^1.9.0",

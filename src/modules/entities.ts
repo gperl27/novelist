@@ -1,11 +1,19 @@
+import {Dispatch} from "redux";
+import {db} from "../index";
+
 export enum EntityTypes {
+    SetEntityStore = 'SET_ENTITY_STORE',
     SelectEntity = 'SELECT_ENTITY',
     UpdateEntity = 'UPDATE_ENTITY'
 }
 
+export enum AppTypes {
+    PersistenceSideEffect = 'PERSISTENCE_SIDE_EFFECT'
+}
+
 interface SelectEntity {
     type: EntityTypes.SelectEntity
-    payload: number
+    payload: string
 }
 
 interface UpdateEntity {
@@ -13,19 +21,34 @@ interface UpdateEntity {
     payload: Entity
 }
 
-type EntityActionTypes = SelectEntity | UpdateEntity
+interface SetEntityStore {
+    type: EntityTypes.SetEntityStore,
+    payload: EntityState
+}
 
-export function selectEntity(entityId: number): EntityActionTypes {
+type EntityActionTypes = SelectEntity | UpdateEntity | SetEntityStore
+
+export function selectEntity(entityId: string): EntityActionTypes {
     return {
         type: EntityTypes.SelectEntity,
         payload: entityId
     }
 }
 
-export function updateEntity(entity: Entity): EntityActionTypes {
+export const updateEntity = (entity: Entity) => async (dispatch: Dispatch) => {
+    const dbEntity = {
+        ...entity,
+        entities: entity.entities.map(entity => entity._id)
+    }
+
+    await db.put(dbEntity)
+    dispatch({type: AppTypes.PersistenceSideEffect})
+}
+
+export function setEntityStore(store: EntityState): EntityActionTypes {
     return {
-        type: EntityTypes.UpdateEntity,
-        payload: entity
+        type: EntityTypes.SetEntityStore,
+        payload: store
     }
 }
 
@@ -33,110 +56,63 @@ export type Traits = string[]
 export type Description = string
 export type Descriptor = Traits | Description
 
-export interface Entity {
-    id: number
+export type PersistenceSchema = PouchDB.Core.IdMeta & PouchDB.Core.GetMeta & {
+    type: string
+}
+
+export interface Entity extends PersistenceSchema {
     name: string
     descriptor?: Descriptor
+    entity?: string
     entities: Entity[]
     shouldAutoComplete: boolean
     shouldDeepLink: boolean
 }
 
-interface EntityState {
+export interface EntityState {
     entities: Entity[]
-    selectedEntityId?: number
+    selectedEntityId?: string
 }
+
+export const entityDocuments = [
+    {
+        _id: '1',
+        type: 'entity',
+        name: "Characters",
+        entities: ['2'],
+        shouldAutoComplete: false,
+        shouldDeepLink: false,
+    },
+    {
+        _id: '2',
+        type: 'entity',
+        name: "Kubo",
+        entity: '1',
+        entities: [],
+        shouldAutoComplete: true,
+        shouldDeepLink: false,
+    },
+    {
+        _id: '3',
+        type: 'entity',
+        name: "Plot",
+        entities: ['4'],
+        shouldAutoComplete: false,
+        shouldDeepLink: false,
+    },
+    {
+        _id: '4',
+        type: 'entity',
+        entity: '3',
+        entities: [],
+        name: "The Beginning",
+        shouldAutoComplete: false,
+        shouldDeepLink: false,
+    }
+]
 
 const initialState: EntityState = {
-    entities: [
-        {
-            id: 1,
-            name: 'Characters',
-            entities: [
-                {
-                    id: 3,
-                    name: 'Kubo',
-                    entities: [
-                        {
-                            id: 4,
-                            name: 'Traits',
-                            descriptor: ['Clever', 'Observant', 'Soft-spoken'],
-                            entities: [],
-                            shouldAutoComplete: true,
-                            shouldDeepLink: true,
-                        },
-                        {
-                            id: 5,
-                            name: 'Description',
-                            descriptor: 'A sophisticated young man with a knack for playing ping pong',
-                            entities: [],
-                            shouldAutoComplete: true,
-                            shouldDeepLink: true,
-                        }
-                    ],
-                    shouldAutoComplete: true,
-                    shouldDeepLink: true,
-                },
-                {
-                    id: 6,
-                    name: 'Knidas',
-                    entities: [
-                        {
-                            id: 7,
-                            name: 'Traits',
-                            descriptor: ['Clever', 'Observant', 'Soft-spoken'],
-                            entities: [],
-                            shouldAutoComplete: true,
-                            shouldDeepLink: true,
-                        },
-                        {
-                            id: 8,
-                            name: 'Description',
-                            descriptor: 'A sophisticated young man with a knack for playing ping pong',
-                            entities: [],
-                            shouldAutoComplete: true,
-                            shouldDeepLink: true,
-                        }
-                    ],
-                    shouldAutoComplete: true,
-                    shouldDeepLink: true,
-                },
-            ],
-            shouldAutoComplete: true,
-            shouldDeepLink: true,
-        },
-        {
-            id: 2,
-            name: 'Plot Points',
-            entities: [{
-                id: 9,
-                name: 'Beginning',
-                descriptor: 'Kubo finds the ping pong world',
-                entities: [],
-                shouldAutoComplete: false,
-                shouldDeepLink: true,
-            }],
-            shouldAutoComplete: true,
-            shouldDeepLink: true,
-        }
-    ]
-}
-
-function findAndReplaceEntity(entities: Entity[], replacement: Entity): Entity[] {
-    return entities.map(entity => {
-        if (entity.id === replacement.id) {
-            return replacement
-        }
-
-        if (entity.entities.length > 0) {
-            return {
-                ...entity,
-                entities: findAndReplaceEntity(entity.entities, replacement)
-            }
-        }
-
-        return entity
-    })
+    entities: []
 }
 
 export function entitiesReducer(state = initialState, action: EntityActionTypes) {
@@ -146,13 +122,12 @@ export function entitiesReducer(state = initialState, action: EntityActionTypes)
                 ...state,
                 selectedEntityId: action.payload
             }
-        case EntityTypes.UpdateEntity:
-            const newEntities: Entity[] = findAndReplaceEntity(state.entities, action.payload)
-
+        case EntityTypes.SetEntityStore: {
             return {
                 ...state,
-                entities: newEntities
+                entities: action.payload.entities
             }
+        }
         default:
             return state
     }

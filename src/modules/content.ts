@@ -1,23 +1,39 @@
-export interface Content {
-    id: number
+import {AppThunk, RootState} from "./index";
+import {AppTypes, Entity, PersistenceSchema} from "./entities";
+import {CombinedState, Dispatch} from "redux";
+import {db} from "../index";
+
+export interface Content extends PersistenceSchema {
     name: string
     text: string
 }
 
 interface ContentState {
-    selectedContentId?: number
+    selectedContentId?: string
     content: Content[]
 }
 
-enum ContentTypes {
+export enum ContentTypes {
+    SetContentStore = 'SET_CONTENT_STORE',
+    SetContent = 'SET_CONTENT',
     SelectContent = 'SELECT_CONTENT',
     UpdateContent = 'UPDATE_CONTENT',
     FindAndReplace = 'FIND_AND_REPLACE'
 }
 
+interface SetContentStore {
+    type: ContentTypes.SetContentStore,
+    payload: ContentState
+}
+
+interface SetContent {
+    type: ContentTypes.SetContent
+    payload: Content[]
+}
+
 interface SelectContent {
     type: ContentTypes.SelectContent
-    payload: number
+    payload: string
 }
 
 interface UpdateContent {
@@ -30,72 +46,90 @@ interface FindAndReplace {
     payload: [string, string]
 }
 
-type ContentActionTypes = SelectContent | UpdateContent | FindAndReplace
+type ContentActionTypes = SetContent | SelectContent | UpdateContent | FindAndReplace | SetContentStore
 
-export function selectContent(contentId: number): ContentActionTypes {
+export const addContent = (content?: Content): AppThunk => async (dispatch,) => {
+    dispatch(setContent([]))
+}
+
+export function setContentStore(store: ContentState): ContentActionTypes {
+    return {
+        type: ContentTypes.SetContentStore,
+        payload: store
+    }
+}
+
+export function setContent(content: Content[]): ContentActionTypes {
+    return {
+        type: ContentTypes.SetContent,
+        payload: content
+    }
+}
+
+export function selectContent(contentId: string): ContentActionTypes {
     return {
         type: ContentTypes.SelectContent,
         payload: contentId
     }
 }
 
-export function updateContent(content: Content): ContentActionTypes {
-    return {
-        type: ContentTypes.UpdateContent,
-        payload: content
-    }
+export const updateContent = (content: Content) => async (dispatch: Dispatch) => {
+    await db.put(content)
+    dispatch({type: AppTypes.PersistenceSideEffect})
 }
 
-export function findAndReplace(findAndReplaceTuple: [string, string]): ContentActionTypes {
-    return {
-        type: ContentTypes.FindAndReplace,
-        payload: findAndReplaceTuple
-    }
+export const findAndReplace = (findAndReplaceTuple: [string, string]) => async (dispatch: Dispatch, getState: () => CombinedState<RootState>) => {
+    const [find, replace] = findAndReplaceTuple
+    const findAll = new RegExp(find, 'g')
+
+    const content = getState().content.content.map(cont => {
+        return {
+            ...cont,
+            name: cont.name.replace(findAll, replace),
+            text: cont.text.replace(findAll, replace)
+        }
+    })
+    await db.bulkDocs(content)
+    dispatch({type: AppTypes.PersistenceSideEffect})
 }
 
-const contentFixture = [
+export const contentFixture = [
     {
-        id: 1,
+        _id: '100',
+        type: 'content',
         name: 'Chapter 1',
         text: 'It was the best of times, it was the worst of times'
     },
     {
-        id: 2,
+        _id: '101',
+        type: 'content',
         name: 'Chapter 2',
         text: 'So it goes...'
     }
 ]
 
 const initialState: ContentState = {
-    selectedContentId: 1,
-    content: contentFixture
+    selectedContentId: '100',
+    content: []
 }
 
 export function contentReducer(state = initialState, action: ContentActionTypes) {
     switch (action.type) {
+        case ContentTypes.SetContent:
+            return {
+                ...state,
+                content: action.payload
+            }
         case ContentTypes.SelectContent:
             return {
                 ...state,
                 selectedContentId: action.payload
             }
-        case ContentTypes.UpdateContent: {
-            const content = state.content.map(cont => {
-                if (cont.id === action.payload.id) {
-                    return action.payload
-                }
-
-                return cont
-            })
-
-            return {
-                ...state,
-                content
-            }
-        }
         case ContentTypes.FindAndReplace: {
+            const [find, replace] = action.payload
+            const findAll = new RegExp(find, 'g')
+
             const content = state.content.map(cont => {
-                const [find, replace] = action.payload
-                const findAll = new RegExp(find, 'g')
                 return {
                     ...cont,
                     name: cont.name.replace(findAll, replace),
@@ -108,6 +142,11 @@ export function contentReducer(state = initialState, action: ContentActionTypes)
                 content
             }
         }
+        case ContentTypes.SetContentStore:
+            return {
+                ...state,
+                content: action.payload.content
+            }
         default:
             return state
     }
