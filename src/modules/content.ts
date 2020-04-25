@@ -1,7 +1,8 @@
 import {AppThunk, RootState} from "./index";
-import {AppTypes, Entity, PersistenceSchema} from "./entities";
-import {CombinedState, Dispatch} from "redux";
+import {PersistenceSchema} from "./entities";
+import {v4 as uuidv4} from 'uuid';
 import {db} from "../index";
+import {updateStores} from "./app";
 
 export interface Content extends PersistenceSchema {
     name: string
@@ -48,8 +49,18 @@ interface FindAndReplace {
 
 type ContentActionTypes = SetContent | SelectContent | UpdateContent | FindAndReplace | SetContentStore
 
-export const addContent = (content?: Content): AppThunk => async (dispatch,) => {
-    dispatch(setContent([]))
+export const addNewContent = (title?: string): AppThunk => async (dispatch,) => {
+    const _id = uuidv4()
+    const content: Omit<Content, '_rev'> = {
+        _id,
+        name: title ?? 'untitled',
+        text: '',
+        type: 'content',
+    }
+
+    await db.put(content)
+    await dispatch(updateStores())
+    dispatch(selectContent(_id))
 }
 
 export function setContentStore(store: ContentState): ContentActionTypes {
@@ -73,12 +84,12 @@ export function selectContent(contentId: string): ContentActionTypes {
     }
 }
 
-export const updateContent = (content: Content) => async (dispatch: Dispatch) => {
+export const updateContent = (content: Content): AppThunk => async (dispatch) => {
     await db.put(content)
-    dispatch({type: AppTypes.PersistenceSideEffect})
+    await dispatch(updateStores())
 }
 
-export const findAndReplace = (findAndReplaceTuple: [string, string]) => async (dispatch: Dispatch, getState: () => CombinedState<RootState>) => {
+export const findAndReplace = (findAndReplaceTuple: [string, string]): AppThunk => async (dispatch, getState) => {
     const [find, replace] = findAndReplaceTuple
     const findAll = new RegExp(find, 'g')
 
@@ -90,7 +101,7 @@ export const findAndReplace = (findAndReplaceTuple: [string, string]) => async (
         }
     })
     await db.bulkDocs(content)
-    dispatch({type: AppTypes.PersistenceSideEffect})
+    await dispatch(updateStores())
 }
 
 export const contentFixture = [

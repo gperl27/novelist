@@ -1,48 +1,81 @@
 import * as React from "react";
 import {useDispatch, useSelector} from "react-redux";
 import {RootState} from "../modules";
-import {Descriptor, Entity, selectEntity, Traits, updateEntity} from "../modules/entities";
+import {
+    addEntity,
+    Descriptor,
+    deselectEntities,
+    Entity,
+    selectEntities,
+    Traits,
+    updateEntity
+} from "../modules/entities";
 import {findAndReplace} from "../modules/content";
-import {Card, Collapse, Button, Tag, Input} from "antd";
-import {ChangeEvent, useState} from "react";
+import {Card, Collapse, Button, Tag, Input, Tree, Divider} from "antd";
+import {ChangeEvent, ComponentProps, createElement, useState} from "react";
 import {
     EditOutlined,
-    CheckOutlined
+    CheckOutlined,
+    PlusOutlined,
+    CloseCircleOutlined,
+    CloseOutlined
 } from '@ant-design/icons';
 
-function findEntity(id: string, entities: Entity[]): Entity | undefined {
-    for (let i = 0; i < entities.length; i++) {
-        const entity = entities[i]
-
-        if (entity._id === id) {
-            return entity
+function transformEntitiesToTreedData(entities: Entity[]): ComponentProps<typeof Tree> ['treeData'] {
+    return entities.map(entity => {
+        return {
+            key: entity._id,
+            title: entity.name,
+            children: transformEntitiesToTreedData(entity.entities)
         }
-
-        if (entity.entities.length > 0) {
-            const nestedEntity = findEntity(id, entity.entities)
-
-            if (nestedEntity?._id === id) {
-                return nestedEntity
-            }
-        }
-    }
+    })
 }
 
 export function EntityEditor() {
-    const {selectedEntity} = useSelector((state: RootState): { selectedEntity?: Entity } => {
-        const {entities, selectedEntityId} = state.entities
-        const selectedEntity = selectedEntityId ? findEntity(selectedEntityId, entities) : undefined
+    const dispatch = useDispatch()
+    const {selectedEntities, entities, selectedEntityIds} = useSelector((state: RootState) => {
+        const {entities, selectedEntityIds, entitiesIndex} = state.entities
+        const selectedEntities = selectedEntityIds.map(id => {
+            const entityFromIndex = entitiesIndex[id]
+            return {
+                ...entityFromIndex,
+                entities: entityFromIndex.entities.map(id => entitiesIndex[id])
+            }
+        })
 
         return {
-            selectedEntity
+            entities,
+            selectedEntities,
+            selectedEntityIds
         }
     })
 
-    if (!selectedEntity) {
-        return null
-    }
-
-    return <EditEntity entity={selectedEntity}/>
+    return (
+        <>
+            <Tree
+                showLine={true}
+                showIcon={true}
+                treeData={transformEntitiesToTreedData(entities)}
+                multiple={true}
+                selectable={true}
+                selectedKeys={selectedEntityIds}
+                onSelect={
+                    (keys) => {
+                        dispatch(selectEntities(keys as string[]))
+                    }
+                }
+            />
+            {
+                selectedEntities.map(entity => {
+                    return (
+                        <div key={entity._id} style={{marginTop: '0.5rem', marginBottom: '0.5rem'}}>
+                            <EditEntity entity={entity as unknown as Entity}/>
+                        </div>
+                    )
+                })
+            }
+        </>
+    )
 }
 
 interface EditEntityProps {
@@ -84,19 +117,22 @@ function Description(props: DescriptionProps) {
 }
 
 interface EditableProps {
+    isEditing?: boolean
+    elementType?: string
     value?: string
     onSave?: (value: string) => void
 }
 
-function Editable(props: EditableProps) {
+export function Editable(props: EditableProps) {
     const [showEdit, setShowEdit] = useState(false)
-    const [isEditing, setIsEditing] = useState(false)
-    const [value, setValue] = useState(props.value || '')
+    const [isEditing, setIsEditing] = useState(props.isEditing ?? false)
+    const [value, setValue] = useState(props.value ?? '')
 
     function onSave(e: React.MouseEvent) {
         e.stopPropagation()
-        props.onSave && props.onSave(value)
         setIsEditing(false)
+
+        props.onSave && props.onSave(value)
     }
 
     function onEdit(e: React.MouseEvent) {
@@ -110,28 +146,30 @@ function Editable(props: EditableProps) {
                 <Input onClick={e => e.stopPropagation()} value={value}
                        onChange={(e: ChangeEvent<HTMLInputElement>) => setValue(e.target.value)}
                        placeholder="Property here"/>
-                <Button type={'link'} shape={'circle'} size={"small"} icon={<CheckOutlined/>} onClick={onSave}/>
+                <Button shape={'circle'} size={"small"} icon={<CheckOutlined/>} onClick={onSave}/>
             </div>
         )
     }
 
     return (
         <div onMouseOver={() => setShowEdit(true)} onMouseLeave={() => setShowEdit(false)} style={{display: 'flex'}}>
-            <h3>{value}</h3>
+            {createElement(props.elementType ?? 'span', null, value)}
             {showEdit &&
-            <Button type={'link'} shape={'circle'} size={"small"} icon={<EditOutlined/>} onClick={onEdit}/>}
+            <Button shape={'circle'} size={"small"} icon={<EditOutlined/>} onClick={onEdit}/>}
         </div>
     )
 
 }
 
 function EditEntity(props: EditEntityProps) {
-    const {entity} = props
+    const {selectedEntityIds} = useSelector((state: RootState) => state.entities)
     const dispatch = useDispatch()
+    const {entity} = props
 
     function onSaveEntity(value: string) {
         dispatch(updateEntity({
             ...entity,
+            isEditing: false,
             name: value
         }))
 
@@ -140,21 +178,44 @@ function EditEntity(props: EditEntityProps) {
         }
     }
 
+    const onClickEntity = (id: string) => () => {
+        if (selectedEntityIds.indexOf(id) === -1) {
+            const ids = selectedEntityIds.concat(id)
+
+            dispatch(selectEntities(ids))
+        }
+    }
+
+    const onClickAddEntity = (entity: Entity) => () => {
+        dispatch(addEntity(entity))
+    }
+
+    function onDeselectEntity() {
+        dispatch(deselectEntities([entity._id]))
+    }
+
     return (
-        <Collapse bordered={false}>
-            <Collapse.Panel
-                key={entity._id}
-                header={<Editable value={entity.name} onSave={onSaveEntity}/>}
-            >
-                <Description description={entity.descriptor}/>
-                {
-                    entity.entities.map((entity, index) => {
-                        return (
-                            <EditEntity key={entity._id} entity={entity}/>
-                        )
-                    })
-                }
-            </Collapse.Panel>
-        </Collapse>
+        <Card
+            title={<Editable isEditing={entity.isEditing} onSave={onSaveEntity} value={entity.name}/>}
+            extra={<div>
+                <Button shape={'circle'} onClick={onDeselectEntity} icon={<CloseOutlined/>}/>
+            </div>}
+        >
+            <Description description={entity.descriptor}/>
+            <Divider/>
+            {entity.entities.length > 0 && <h4>Entities:</h4>}
+            {
+                entity.entities.map(entity => {
+                    return (
+                        <div key={entity._id}>
+                            <h5 onClick={onClickEntity(entity._id)} key={entity._id}>{entity.name}</h5>
+                        </div>
+                    )
+                })
+            }
+            <Button onClick={onClickAddEntity(entity)} type={'dashed'}>
+                <PlusOutlined/> Add Entity
+            </Button>
+        </Card>
     )
 }

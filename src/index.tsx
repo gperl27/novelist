@@ -3,17 +3,16 @@ import ReactDOM from 'react-dom';
 import './index.css';
 import App from './App';
 import * as serviceWorker from './serviceWorker';
-import {Action, applyMiddleware, createStore, Dispatch, Middleware, MiddlewareAPI, StoreEnhancer} from "redux";
+import {applyMiddleware, createStore} from "redux";
 import {rootReducer} from "./modules";
 import {Provider} from 'react-redux'
 import Pouch from 'pouchdb';
 import thunk from "redux-thunk";
-import {AppTypes, Entity, entityDocuments, setEntityStore} from "./modules/entities";
-import {Content, setContentStore} from "./modules/content";
+import {Entity} from "./modules/entities";
 
 export const db = new Pouch('novelist');
 
-interface DbEntity extends Omit<Entity, 'entities'> {
+export interface DbEntity extends Omit<Entity, 'entities'> {
     entities: string[]
 }
 
@@ -40,38 +39,7 @@ export function flatToHierarchy(flat: DbEntity[], parentId?: string, index = {} 
     return roots
 }
 
-export const pouchWrite: Middleware = api => next => action => {
-    if (action.type === AppTypes.PersistenceSideEffect) {
-        db.bulkDocs(entityDocuments)
-            .catch(e => console.log(e))
-            .finally(() => {
-                db.allDocs({include_docs: true}).then(docs => {
-                    const entities = docs.rows.filter(row => {
-                        // @ts-ignore
-                        return row.doc.type === 'entity'
-                    })
-                        .map(row => row.doc)
-
-                    const a = store.getState
-                    // @ts-ignore
-                    const content: Content[] = docs.rows.filter(row => row.doc.type === 'content').map(row => row.doc)
-
-                    store.dispatch(setEntityStore({
-                        // @ts-ignore
-                        entities: flatToHierarchy(entities)
-                    }))
-                    store.dispatch(setContentStore({
-                        // @ts-ignore
-                        content
-                    }))
-                })
-            })
-    }
-
-    return next(action);
-};
-
-const store = createStore(rootReducer, applyMiddleware(thunk, pouchWrite))
+const store = createStore(rootReducer, applyMiddleware(thunk))
 
 ReactDOM.render(
     <Provider store={store}>

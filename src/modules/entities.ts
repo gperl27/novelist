@@ -1,19 +1,18 @@
-import {Dispatch} from "redux";
-import {db} from "../index";
+import {db, DbEntity} from "../index";
+import {v4 as uuidv4} from 'uuid';
+import {AppThunk} from "./index";
+import {updateStores} from "./app";
 
 export enum EntityTypes {
+    AddEntity = 'ADD_ENTITY',
     SetEntityStore = 'SET_ENTITY_STORE',
-    SelectEntity = 'SELECT_ENTITY',
+    SelectEntities = 'SELECT_ENTITIES',
     UpdateEntity = 'UPDATE_ENTITY'
 }
 
-export enum AppTypes {
-    PersistenceSideEffect = 'PERSISTENCE_SIDE_EFFECT'
-}
-
-interface SelectEntity {
-    type: EntityTypes.SelectEntity
-    payload: string
+interface SelectEntities {
+    type: EntityTypes.SelectEntities
+    payload: string[]
 }
 
 interface UpdateEntity {
@@ -23,29 +22,68 @@ interface UpdateEntity {
 
 interface SetEntityStore {
     type: EntityTypes.SetEntityStore,
-    payload: EntityState
+    payload: Partial<EntityState>
 }
 
-type EntityActionTypes = SelectEntity | UpdateEntity | SetEntityStore
+interface AddEntity {
+    type: EntityTypes.AddEntity,
+    payload: Entity
+}
 
-export function selectEntity(entityId: string): EntityActionTypes {
+type EntityActionTypes = SelectEntities | UpdateEntity | SetEntityStore | AddEntity
+
+export function selectEntities(entityIds: string[]): EntityActionTypes {
     return {
-        type: EntityTypes.SelectEntity,
-        payload: entityId
+        type: EntityTypes.SelectEntities,
+        payload: entityIds
     }
 }
 
-export const updateEntity = (entity: Entity) => async (dispatch: Dispatch) => {
+export const deselectEntities = (entityIds: string[]): AppThunk => async (dispatch, getState) => {
+    const currentlySelectedIds = getState().entities.selectedEntityIds
+    const idsAfterDeselecting = currentlySelectedIds.filter(id => entityIds.indexOf(id) === -1)
+
+    dispatch({
+        type: EntityTypes.SelectEntities,
+        payload: idsAfterDeselecting
+    })
+}
+
+export const updateEntity = (entity: Entity): AppThunk => async (dispatch) => {
     const dbEntity = {
         ...entity,
         entities: entity.entities.map(entity => entity._id)
     }
 
     await db.put(dbEntity)
-    dispatch({type: AppTypes.PersistenceSideEffect})
+    await dispatch(updateStores())
 }
 
-export function setEntityStore(store: EntityState): EntityActionTypes {
+export const addEntity = (parentEntity: Entity): AppThunk => async (
+    dispatch, getState
+) => {
+    const _id = uuidv4()
+    const dbEntity: Omit<Entity, '_rev'> = {
+        _id,
+        name: 'Untitled',
+        entity: parentEntity._id,
+        type: 'entity',
+        entities: [],
+        isEditing: true,
+        shouldAutoComplete: false,
+        shouldDeepLink: false,
+    }
+
+    await db.put(dbEntity)
+    await dispatch(updateEntity({
+        ...parentEntity,
+        entities: parentEntity.entities.concat(dbEntity as Entity)
+    }))
+    const ids = getState().entities.selectedEntityIds.concat(_id)
+    dispatch(selectEntities(ids))
+}
+
+export function setEntityStore(store: Partial<EntityState>): EntityActionTypes {
     return {
         type: EntityTypes.SetEntityStore,
         payload: store
@@ -67,11 +105,13 @@ export interface Entity extends PersistenceSchema {
     entities: Entity[]
     shouldAutoComplete: boolean
     shouldDeepLink: boolean
+    isEditing: boolean
 }
 
 export interface EntityState {
+    entitiesIndex: { [key: string]: DbEntity }
     entities: Entity[]
-    selectedEntityId?: string
+    selectedEntityIds: string[]
 }
 
 export const entityDocuments = [
@@ -112,20 +152,22 @@ export const entityDocuments = [
 ]
 
 const initialState: EntityState = {
-    entities: []
+    entitiesIndex: {},
+    selectedEntityIds: [],
+    entities: [],
 }
 
 export function entitiesReducer(state = initialState, action: EntityActionTypes) {
     switch (action.type) {
-        case EntityTypes.SelectEntity:
+        case EntityTypes.SelectEntities:
             return {
                 ...state,
-                selectedEntityId: action.payload
+                selectedEntityIds: action.payload
             }
         case EntityTypes.SetEntityStore: {
             return {
                 ...state,
-                entities: action.payload.entities
+                ...action.payload
             }
         }
         default:

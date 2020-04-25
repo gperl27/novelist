@@ -1,22 +1,89 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {Ref, RefObject, useEffect, useRef, useState} from 'react';
 import MonacoEditor from "react-monaco-editor";
 import * as monacoEditor from 'monaco-editor';
 import {useDispatch, useSelector} from "react-redux";
 import {RootState} from "./modules";
 import {
     Entity, entityDocuments,
-    selectEntity, setEntityStore,
+    selectEntities, setEntityStore,
 } from "./modules/entities";
-import {EntityEditor} from "./components/EntityEditor";
+import {Editable, EntityEditor} from "./components/EntityEditor";
 import {
+    addNewContent,
     Content,
     contentFixture,
     selectContent, setContentStore,
     updateContent
 } from "./modules/content";
 import {Button, Menu} from "antd";
-import {db, flatToHierarchy} from "./index";
+import {db, DbEntity, flatToHierarchy} from "./index";
 import {useDebounce} from "use-debounce";
+import {updateStores} from "./modules/app";
+
+interface DirectoryProps {
+    editorValue: string
+    editorRef: RefObject<MonacoEditor>
+}
+
+function Directory(props: DirectoryProps) {
+    const dispatch = useDispatch()
+    const entities = useKeyEntities()
+    const {content, selectedContent} = useSelector((state: RootState) => {
+        const {content, selectedContentId} = state.content
+        const selectedContent = state.content.content.find(c => c._id === selectedContentId)
+
+        return {
+            selectedContent,
+            content,
+            entities
+        }
+    })
+
+    function onClickNew() {
+        if (selectedContent) {
+            dispatch(updateContent({
+                ...selectedContent,
+                text: props.editorValue
+            }))
+        }
+        dispatch(addNewContent())
+        props.editorRef?.current?.editor?.focus()
+    }
+
+    const onClickSelectContent = (contentId: string) => () => {
+        if (selectedContent) {
+            if (selectedContent.text !== props.editorValue) {
+                dispatch(updateContent({
+                    ...selectedContent,
+                    text: props.editorValue
+                }))
+            }
+        }
+        dispatch(selectContent(contentId))
+    }
+
+    const onSaveContentName = (content: Content) => (value: string) => {
+        dispatch(updateContent({
+            ...content,
+            name: value
+        }))
+    }
+
+    return (
+        <Menu selectedKeys={selectedContent ? [selectedContent._id.toString()] : []} mode={'inline'}>
+            <Menu.ItemGroup title={'My Workbook'}>
+                {content.map(cont => {
+                    return <Menu.Item onClick={onClickSelectContent(cont._id)}
+                                      key={cont._id}>
+                        <Editable value={cont.name} onSave={onSaveContentName(cont)}/>
+                    </Menu.Item>
+                })}
+                <Menu.Item><Button onClick={onClickNew} type={'primary'}>Add
+                    New</Button></Menu.Item>
+            </Menu.ItemGroup>
+        </Menu>
+    )
+}
 
 function useKeyEntities() {
     const {entities} = useSelector((state: RootState) => state.entities)
@@ -34,16 +101,15 @@ function useKeyEntities() {
 
 function App() {
     const dispatch = useDispatch()
-    const {content, selectedContent} = useSelector((state: RootState) => {
-        const {content, selectedContentId} = state.content
+    const {selectedContent} = useSelector((state: RootState) => {
+        const {selectedContentId} = state.content
         const selectedContent = state.content.content.find(c => c._id === selectedContentId)
 
         return {
             selectedContent,
-            content
         }
     })
-    const {entities} = useSelector((state: RootState) => state.entities)
+    // const {entities} = useSelector((state: RootState) => state.entities)
     const valueFromSelected = selectedContent?.text ?? ''
     const [value, setValue] = useState(valueFromSelected)
     const [text] = useDebounce(value, 1000);
@@ -74,47 +140,9 @@ function App() {
         db.bulkDocs([...entityDocuments, ...contentFixture])
             .catch(e => (e))
             .finally(() => {
-                db.allDocs({include_docs: true}).then(docs => {
-                    const entities = docs.rows.filter(row => {
-                        // @ts-ignore
-                        return row.doc.type === 'entity'
-                    })
-                        .map(row => row.doc)
-
-                    // @ts-ignore
-                    const content: Content[] = docs.rows.filter(row => row.doc.type === 'content').map(row => row.doc)
-
-                    dispatch(setEntityStore({
-                        // @ts-ignore
-                        entities: flatToHierarchy(entities)
-                    }))
-                    dispatch(setContentStore({
-                        // @ts-ignore
-                        content
-                    }))
-                })
+                dispatch(updateStores())
             })
     }, [])
-
-    function Directory() {
-        return (
-            <Menu selectedKeys={selectedContent ? [selectedContent._id.toString()] : []} mode={'inline'}>
-                <Menu.ItemGroup title={'Entities'}>
-                    {entities.map(entity => {
-                        return <Menu.Item onClick={() => dispatch(selectEntity(entity._id))}
-                                          key={entity.name}>{entity.name}</Menu.Item>
-                    })}
-                </Menu.ItemGroup>
-                <Menu.ItemGroup title={'My Workbook'}>
-                    {content.map(cont => {
-                        return <Menu.Item onClick={() => dispatch(selectContent(cont._id))}
-                                          key={cont._id}>{cont.name}</Menu.Item>
-                    })}
-                    <Menu.Item><Button type={'primary'}>Add New</Button></Menu.Item>
-                </Menu.ItemGroup>
-            </Menu>
-        )
-    }
 
 
     useEffect(() => {
@@ -174,7 +202,7 @@ function App() {
     useEffect(() => {
         const providerMap = keyEntities.map(entity => {
             const commandId = ref?.current?.editor?.addCommand(0, function () {
-                dispatch(selectEntity(entity._id))
+                dispatch(selectEntities([entity._id]))
             }, '');
 
             const provider = monacoRef?.current?.languages.registerCodeLensProvider('markdown', {
@@ -230,7 +258,7 @@ function App() {
         <div style={{height: '100%'}}>
             <div style={{height: '100%', display: 'flex', paddingTop: '1rem', paddingBottom: '1rem'}}>
                 <div style={{flex: 1, paddingLeft: '1rem', paddingRight: '1rem'}}>
-                    <Directory/>
+                    <Directory editorRef={ref} editorValue={value}/>
                 </div>
                 <div style={{flex: 2}}>
                     <MonacoEditor
