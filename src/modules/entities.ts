@@ -65,6 +65,7 @@ export const addEntity = (parentEntity: Entity): AppThunk => async (
     const _id = uuidv4()
     const dbEntity: Omit<Entity, '_rev'> = {
         _id,
+        descriptors: [],
         name: 'Untitled',
         entity: parentEntity._id,
         type: 'entity',
@@ -90,8 +91,11 @@ export function setEntityStore(store: Partial<EntityState>): EntityActionTypes {
     }
 }
 
-export type Traits = string[]
-export type Description = string
+export interface DescriptorBase {
+    name: string
+}
+export type Traits = DescriptorBase & { traits: string[] }
+export type Description = DescriptorBase & { description: string }
 export type Descriptor = Traits | Description
 
 export type PersistenceSchema = PouchDB.Core.IdMeta & PouchDB.Core.GetMeta & {
@@ -100,7 +104,7 @@ export type PersistenceSchema = PouchDB.Core.IdMeta & PouchDB.Core.GetMeta & {
 
 export interface Entity extends PersistenceSchema {
     name: string
-    descriptor?: Descriptor
+    descriptors: Descriptor[]
     entity?: string
     entities: Entity[]
     shouldAutoComplete: boolean
@@ -114,40 +118,48 @@ export interface EntityState {
     selectedEntityIds: string[]
 }
 
-export const entityDocuments = [
+export const entityDocuments: Omit<DbEntity, '_rev'>[] = [
     {
         _id: '1',
+        descriptors: [],
         type: 'entity',
         name: "Characters",
         entities: ['2'],
         shouldAutoComplete: false,
         shouldDeepLink: false,
+        isEditing: false
     },
     {
         _id: '2',
+        descriptors: [],
         type: 'entity',
         name: "Kubo",
         entity: '1',
         entities: [],
         shouldAutoComplete: true,
         shouldDeepLink: false,
+        isEditing: false
     },
     {
         _id: '3',
+        descriptors: [],
         type: 'entity',
         name: "Plot",
         entities: ['4'],
         shouldAutoComplete: false,
         shouldDeepLink: false,
+        isEditing: false
     },
     {
         _id: '4',
+        descriptors: [],
         type: 'entity',
         entity: '3',
         entities: [],
         name: "The Beginning",
         shouldAutoComplete: false,
         shouldDeepLink: false,
+        isEditing: false
     }
 ]
 

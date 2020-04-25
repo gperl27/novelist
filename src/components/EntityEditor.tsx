@@ -2,7 +2,7 @@ import * as React from "react";
 import {useDispatch, useSelector} from "react-redux";
 import {RootState} from "../modules";
 import {
-    addEntity,
+    addEntity, Description,
     Descriptor,
     deselectEntities,
     Entity,
@@ -11,14 +11,16 @@ import {
     updateEntity
 } from "../modules/entities";
 import {findAndReplace} from "../modules/content";
-import {Card, Collapse, Button, Tag, Input, Tree, Divider} from "antd";
+import {Card, Collapse, Button, Tag, Input, Tree, Divider, Form, Switch, Select} from "antd";
 import {ChangeEvent, ComponentProps, createElement, useState} from "react";
 import {
     EditOutlined,
     CheckOutlined,
     PlusOutlined,
     CloseCircleOutlined,
-    CloseOutlined
+    CloseOutlined,
+    EllipsisOutlined,
+    DeleteOutlined
 } from '@ant-design/icons';
 
 function transformEntitiesToTreedData(entities: Entity[]): ComponentProps<typeof Tree> ['treeData'] {
@@ -83,37 +85,46 @@ interface EditEntityProps {
 }
 
 function areTraits(descriptor: any): descriptor is Traits {
-    return Array.isArray(descriptor)
+    return Array.isArray(descriptor.traits)
 }
 
-function isDescription(descriptor: any): descriptor is Traits {
-    return typeof descriptor == 'string'
+function isDescription(descriptor: any): descriptor is Description {
+    return descriptor.description && typeof descriptor.description === 'string'
 }
 
 interface DescriptionProps {
-    description?: Descriptor
+    isEditing: boolean
+    description: Descriptor
 }
 
-function Description(props: DescriptionProps) {
-    const {description} = props
+function DescriptionForm(props: DescriptionProps) {
+    const {description, isEditing} = props
+    let node
 
     if (areTraits(description)) {
-        return (
-            <div>
-                {description.map(trait => {
-                    return (
-                        <Tag key={trait}>{trait}</Tag>
-                    )
-                })}
-            </div>
-        )
+        node = isEditing ? (
+                <div>
+                    {description.traits.map(trait => {
+                        return (
+                            <Tag key={trait}>{trait}</Tag>
+                        )
+                    })}
+                </div>
+            )
+            :
+            (<div>isEditing</div>)
     }
 
     if (isDescription(description)) {
-        return <div>{description}</div>
+        node = isEditing ? <div>isEditing</div> : <div>{description}</div>
     }
 
-    return null
+    return (
+        <div>
+            {isEditing ? <div>isEditing</div> : <h4>{description.name}</h4>}
+            {node}
+        </div>
+    )
 }
 
 interface EditableProps {
@@ -161,10 +172,33 @@ export function Editable(props: EditableProps) {
 
 }
 
+type DescriptorType = 'traits' | 'description'
+
+interface FormDescriptor {
+    id: string | number
+    name: string,
+    type: DescriptorType,
+    traits?: string[]
+    description?: string
+}
+
+function transformDescriptors(descriptors: Descriptor[]): FormDescriptor[] {
+    return descriptors.map((descriptor, index) => {
+        return {
+            id: index,
+            type: areTraits(descriptor) ? 'traits' : 'description',
+            name: descriptor.name
+        }
+    })
+}
+
 function EditEntity(props: EditEntityProps) {
     const {selectedEntityIds} = useSelector((state: RootState) => state.entities)
     const dispatch = useDispatch()
     const {entity} = props
+    const [isEditing, setIsEditing] = useState(props.entity.isEditing ?? false)
+    const [descriptors, setDescriptors] = useState(transformDescriptors(entity.descriptors) || [])
+    const [form] = Form.useForm()
 
     function onSaveEntity(value: string) {
         dispatch(updateEntity({
@@ -186,6 +220,15 @@ function EditEntity(props: EditEntityProps) {
         }
     }
 
+    const onClickEditEntity = (entity: Entity) => () => {
+        setIsEditing(true)
+
+        dispatch(updateEntity({
+            ...entity,
+            isEditing: true,
+        }))
+    }
+
     const onClickAddEntity = (entity: Entity) => () => {
         dispatch(addEntity(entity))
     }
@@ -194,16 +237,122 @@ function EditEntity(props: EditEntityProps) {
         dispatch(deselectEntities([entity._id]))
     }
 
+    const onSelectDescriptorType = (formName: string, descriptor: FormDescriptor) => (type: DescriptorType) => {
+        const descriptionIndex = descriptors.findIndex(d => d.id === descriptor.id)
+
+        if (descriptionIndex === -1) {
+            return
+        }
+
+        const descriptorsMutable = [...descriptors]
+        descriptorsMutable[descriptionIndex] = {
+            ...descriptor,
+            type
+        }
+
+        setDescriptors(descriptorsMutable)
+    }
+
     return (
         <Card
-            title={<Editable isEditing={entity.isEditing} onSave={onSaveEntity} value={entity.name}/>}
+            actions={[
+                <PlusOutlined onClick={onClickAddEntity(entity)}/>,
+                <EditOutlined onClick={onClickEditEntity(entity)}/>,
+                <DeleteOutlined onClick={() => console.log('delete')}/>,
+                <EllipsisOutlined onClick={() => console.log('ellipsis')}/>,
+            ]}
+            title={<h3>{entity.name}</h3>}
             extra={<div>
                 <Button shape={'circle'} onClick={onDeselectEntity} icon={<CloseOutlined/>}/>
             </div>}
         >
-            <Description description={entity.descriptor}/>
-            <Divider/>
-            {entity.entities.length > 0 && <h4>Entities:</h4>}
+            {/*{*/}
+            {/*    entity.descriptors.map((descriptor, index) => {*/}
+            {/*        return <DescriptionForm isEditing={isEditing} key={index} description={descriptor}/>*/}
+            {/*    })*/}
+            {/*}*/}
+            {
+                isEditing && (
+                    <Form form={form} onFinish={console.log} initialValues={{
+                        name: props.entity.name,
+                        // descriptors: props.entity.descriptors
+                        // shouldAutoComplete: props.entity.shouldAutoComplete,
+                        // shouldDeepLink: props.entity.shouldDeepLink
+                    }}>
+                        <Form.Item label={'Entity Name'} name={'name'}>
+                            <Input placeholder={"Entity name"} onChange={console.log}/>
+                        </Form.Item>
+                        <Form.Item name={'shouldAutoComplete'} label="Enable Word Completion">
+                            <Switch defaultChecked={props.entity.shouldAutoComplete} size={'small'}/>
+                        </Form.Item>
+                        <Form.Item name={'shouldDeepLink'} label="Enable Deep Linking">
+                            <Switch defaultChecked={props.entity.shouldDeepLink} size={'small'}/>
+                        </Form.Item>
+                        {
+                            descriptors.map((descriptor, index) => {
+                                const key = `descriptor-${descriptor.name}-${index}-${entity._id}`
+
+                                return (
+                                    <div key={key}>
+                                        <h5>{descriptor.name}</h5>
+                                        <Form.Item
+                                            label={'Name'}
+                                            name={`${key}-name`}
+                                        >
+                                            <Input defaultValue={descriptor.name}/>
+                                        </Form.Item>
+                                        <Form.Item name={`${key}-type`} label={'Type'}>
+                                            <Select onChange={onSelectDescriptorType(key, descriptor)}
+                                                    defaultValue={descriptor.type}>
+                                                <Select.Option value="description">Description</Select.Option>
+                                                <Select.Option value="traits">Traits</Select.Option>
+                                            </Select>
+                                        </Form.Item>
+                                        {
+                                            descriptor.type === 'traits' ?
+                                                <div>
+                                                    {
+                                                        descriptor.traits && descriptor.traits.map((trait, index) => {
+                                                            return <Tag key={index}>{trait}</Tag>
+                                                        })}
+                                                    <Tag className="site-tag-plus" onClick={console.log}>
+                                                        <PlusOutlined/> New Trait
+                                                    </Tag>
+                                                </div>
+                                                :
+                                                <Form.Item
+                                                    label={'Description'}
+                                                    name={`${key}-description`}
+                                                >
+                                                    <Input/>
+                                                </Form.Item>
+                                        }
+                                    </div>
+                                )
+                            })
+                        }
+                        <Button type={'dashed'}
+                                onClick={() => setDescriptors(d => d.concat({
+                                    id: descriptors.length + 1,
+                                    name: 'Untitled',
+                                    type: 'description',
+                                    description: ''
+                                }))}>+ Add
+                            Descriptor</Button>
+                        <Form.Item>
+                            <Button htmlType={'submit'}>Save</Button>
+                        </Form.Item>
+                        <Button onClick={() => setIsEditing(false)}>Cancel</Button>
+                    </Form>
+                )
+            }
+
+            {entity.entities.length > 0 && (
+                <>
+                    <Divider/>
+                    <h4>Entities:</h4>
+                </>
+            )}
             {
                 entity.entities.map(entity => {
                     return (
@@ -213,9 +362,7 @@ function EditEntity(props: EditEntityProps) {
                     )
                 })
             }
-            <Button onClick={onClickAddEntity(entity)} type={'dashed'}>
-                <PlusOutlined/> Add Entity
-            </Button>
         </Card>
     )
 }
+
