@@ -216,6 +216,20 @@ function transformFormDescriptors(descriptors: FormDescriptor[]): Descriptor[] {
   });
 }
 
+function getInitialDescriptorValues(descriptors: FormDescriptor[]) {
+  const initialValues: { [key: string]: string | undefined } = {};
+
+  descriptors.forEach((descriptor) => {
+    const { id, name, description, type } = descriptor;
+
+    initialValues[`${id}-name`] = name;
+    initialValues[`${id}-description`] = description;
+    initialValues[`${id}-type`] = type;
+  });
+
+  return initialValues;
+}
+
 function EditEntity(props: EditEntityProps) {
   const { entity } = props;
   const { selectedEntityIds } = useSelector(
@@ -223,9 +237,8 @@ function EditEntity(props: EditEntityProps) {
   );
   const dispatch = useDispatch();
   const [isEditing, setIsEditing] = useState(props.entity.isEditing ?? false);
-  const [descriptors, setDescriptors] = useState(
-    transformDescriptors(entity.descriptors)
-  );
+  const transformedDescriptors = transformDescriptors(entity.descriptors);
+  const [descriptors, setDescriptors] = useState(transformedDescriptors);
   const [form] = Form.useForm();
 
   useEffect(() => {
@@ -289,10 +302,9 @@ function EditEntity(props: EditEntityProps) {
     dispatch(deselectEntities([entity._id]));
   }
 
-  function onSelectDescriptorType(
-    descriptor: FormDescriptor,
+  const onSelectDescriptorType = (descriptor: FormDescriptor) => (
     type: DescriptorType
-  ) {
+  ) => {
     const descriptionIndex = descriptors.findIndex(
       (d) => d.id === descriptor.id
     );
@@ -308,9 +320,11 @@ function EditEntity(props: EditEntityProps) {
     };
 
     setDescriptors(descriptorsMutable);
-  }
+  };
 
-  function onTraitsChanged(descriptor: FormDescriptor, traits: string[]) {
+  const onTraitsChanged = (descriptor: FormDescriptor) => (
+    traits: string[]
+  ) => {
     const updatedDescriptors = descriptors.map((d) => {
       if (d.id === descriptor.id) {
         return {
@@ -323,7 +337,7 @@ function EditEntity(props: EditEntityProps) {
     });
 
     setDescriptors(updatedDescriptors);
-  }
+  };
 
   function onRemoveDescriptor(descriptorId: number) {
     const descriptorsMutable = [...descriptors];
@@ -360,6 +374,7 @@ function EditEntity(props: EditEntityProps) {
             name: props.entity.name,
             shouldDeepLink: props.entity.shouldDeepLink,
             shouldAutoComplete: props.entity.shouldAutoComplete,
+            ...getInitialDescriptorValues(transformedDescriptors),
           }}
         >
           <Form.Item label={"Entity Name"} name={"name"}>
@@ -393,9 +408,8 @@ function EditEntity(props: EditEntityProps) {
                 }
               >
                 <DescriptorForm
-                  onTraitsChanged={onTraitsChanged}
-                  form={form}
-                  onSelectDescriptorType={onSelectDescriptorType}
+                  onTraitsChanged={onTraitsChanged(descriptor)}
+                  onSelectDescriptorType={onSelectDescriptorType(descriptor)}
                   id={id}
                   isEditing={isEditing}
                   descriptor={descriptor}
@@ -492,46 +506,23 @@ interface DescriptorFormProps {
   id: string;
   descriptor: FormDescriptor;
   isEditing?: boolean;
-  onSelectDescriptorType?: (
-    descriptor: FormDescriptor,
-    type: DescriptorType
-  ) => void;
-  onTraitsChanged?: (descriptor: FormDescriptor, traits: string[]) => void;
-  form?: ComponentProps<Form>["form"];
+  onSelectDescriptorType?: (type: DescriptorType) => void;
+  onTraitsChanged?: (traits: string[]) => void;
 }
 
 function DescriptorForm(props: DescriptorFormProps) {
-  const { id, descriptor } = props;
+  const { id, descriptor, onTraitsChanged } = props;
   const [isEditingTag, setIsEditingTag] = useState(false);
   const [traits, setTraits] = useState<string[]>(descriptor.traits ?? []);
   const [addTraitValue, setAddTraitValue] = useState("");
 
   useEffect(() => {
-    if (props.form) {
-      props.form.setFieldsValue({ [`${id}-name`]: descriptor.name });
-      props.form.setFieldsValue({
-        [`${id}-description`]: descriptor.description,
-      });
-      props.form.setFieldsValue({ [`${id}-type`]: descriptor.type });
-    }
-  }, [
-    descriptor.description,
-    descriptor.name,
-    descriptor.type,
-    id,
-    props.form,
-  ]);
-
-  const onSelectDescriptorType = (descriptor: FormDescriptor) => (
-    type: DescriptorType
-  ) => {
-    props.onSelectDescriptorType &&
-      props.onSelectDescriptorType(descriptor, type);
-  };
-
-  useEffect(() => {
-    props.onTraitsChanged && props.onTraitsChanged(descriptor, traits);
+    onTraitsChanged && onTraitsChanged(traits);
   }, [traits]);
+
+  const onSelectDescriptorType = (type: DescriptorType) => {
+    props.onSelectDescriptorType && props.onSelectDescriptorType(type);
+  };
 
   function onSaveTag(value: string, index?: number) {
     if (typeof index !== "undefined") {
@@ -563,7 +554,7 @@ function DescriptorForm(props: DescriptorFormProps) {
         <Input />
       </Form.Item>
       <Form.Item name={`${id}-type`} label={"Type"}>
-        <Select onChange={onSelectDescriptorType(descriptor)}>
+        <Select onChange={onSelectDescriptorType}>
           <Select.Option value="description">Description</Select.Option>
           <Select.Option value="traits">Traits</Select.Option>
         </Select>
@@ -576,6 +567,7 @@ function DescriptorForm(props: DescriptorFormProps) {
                 <TagInput
                   value={trait}
                   closable={props.isEditing}
+                  onClose={() => onSaveTag("", index)}
                   onSave={(value) => onSaveTag(value, index)}
                 />
               </div>
