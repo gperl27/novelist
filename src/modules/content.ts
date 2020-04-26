@@ -129,7 +129,6 @@ export const contentFixture = [
 ];
 
 const initialState: ContentState = {
-  selectedContentId: "100",
   content: [],
 };
 

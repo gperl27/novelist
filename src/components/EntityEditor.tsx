@@ -531,7 +531,7 @@ function DescriptorForm(props: DescriptorFormProps) {
 
   useEffect(() => {
     props.onTraitsChanged && props.onTraitsChanged(descriptor, traits);
-  }, [descriptor, props, traits]);
+  }, [traits]);
 
   function onSaveTag(value: string, index?: number) {
     if (typeof index !== "undefined") {

@@ -14,12 +14,14 @@ import {
 } from "./modules/content";
 import { Button, Menu } from "antd";
 import { db } from "./index";
-import { useDebounce } from "use-debounce";
+import { useDebouncedCallback } from "use-debounce";
 import { updateStores } from "./modules/app";
 
 interface DirectoryProps {
-  editorValue: string;
+  editorValue?: string;
   editorRef: RefObject<MonacoEditor>;
+  onClickNew?: () => void;
+  onClickSelectContent?: () => void;
 }
 
 function Directory(props: DirectoryProps) {
@@ -39,7 +41,7 @@ function Directory(props: DirectoryProps) {
   });
 
   function onClickNew() {
-    if (selectedContent) {
+    if (selectedContent && props.editorValue) {
       dispatch(
         updateContent({
           ...selectedContent,
@@ -48,11 +50,13 @@ function Directory(props: DirectoryProps) {
       );
     }
     dispatch(addNewContent());
+
     props.editorRef?.current?.editor?.focus();
+    props.onClickNew && props.onClickNew();
   }
 
   const onClickSelectContent = (contentId: string) => () => {
-    if (selectedContent) {
+    if (selectedContent && props.editorValue) {
       if (selectedContent.text !== props.editorValue) {
         dispatch(
           updateContent({
@@ -63,6 +67,7 @@ function Directory(props: DirectoryProps) {
       }
     }
     dispatch(selectContent(contentId));
+    props.onClickSelectContent && props.onClickSelectContent();
   };
 
   const onSaveContentName = (content: Content) => (value: string) => {
@@ -123,30 +128,29 @@ function App() {
       selectedContent,
     };
   });
-  // const {entities} = useSelector((state: RootState) => state.entities)
-  const valueFromSelected = selectedContent?.text ?? "";
-  const [value, setValue] = useState(valueFromSelected);
-  const [text] = useDebounce(value, 1000);
+
+  const [value, setValue] = useState<string | undefined>(selectedContent?.text);
   const keyEntities = useKeyEntities();
   const monacoRef = useRef<typeof monacoEditor>();
   const ref = useRef<MonacoEditor>(null);
 
-  useEffect(() => {
+  const [debouncedCallback, cancel] = useDebouncedCallback((value: string) => {
+    console.log(value, "value");
     if (selectedContent) {
-      if (selectedContent.text !== text) {
-        dispatch(
-          updateContent({
-            ...selectedContent,
-            text,
-          })
-        );
-      }
+      dispatch(
+        updateContent({
+          ...selectedContent,
+          text: value,
+        })
+      );
     }
-  }, [dispatch, selectedContent, text]);
+  }, 1000);
 
   useEffect(() => {
-    setValue(valueFromSelected);
-  }, [valueFromSelected]);
+    if (selectedContent) {
+      setValue(selectedContent.text);
+    }
+  }, [selectedContent]);
 
   function editorWillMount(monaco: typeof monacoEditor) {
     monacoRef.current = monaco;
@@ -155,8 +159,9 @@ function App() {
   React.useEffect(() => {
     db.bulkDocs([...entityDocuments, ...contentFixture])
       .catch((e) => e)
-      .finally(() => {
-        dispatch(updateStores());
+      .finally(async () => {
+        await dispatch(updateStores());
+        dispatch(selectContent("100"));
       });
   }, [dispatch]);
 
@@ -296,13 +301,19 @@ function App() {
         }}
       >
         <div style={{ flex: 1, paddingLeft: "1rem", paddingRight: "1rem" }}>
-          <Directory editorRef={ref} editorValue={value} />
+          <Directory
+            onClickSelectContent={cancel}
+            onClickNew={cancel}
+            editorRef={ref}
+            editorValue={value}
+          />
         </div>
         <div style={{ flex: 2 }}>
           <MonacoEditor
             onChange={(text) => {
               if (selectedContent) {
                 setValue(text);
+                debouncedCallback(text);
               }
             }}
             ref={ref}
