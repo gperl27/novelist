@@ -1,10 +1,19 @@
-import React, { RefObject, useEffect, useRef, useState } from "react";
+import "./App.css";
+import React, { useEffect, useRef } from "react";
 import MonacoEditor from "react-monaco-editor";
-import * as monacoEditor from "monaco-editor";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "./modules";
-import { Entity, entityDocuments, selectEntities } from "./modules/entities";
-import { Editable, EntityEditor } from "./components/EntityEditor";
+import {
+  entityDocuments,
+  selectEntity,
+  setDeleteEntityModal,
+  setEditEntityModal,
+} from "./modules/entities";
+import {
+  Editable,
+  EditEntitySettings,
+  EntityListContainer,
+} from "./components/EntityEditor";
 import {
   addNewContent,
   Content,
@@ -12,21 +21,21 @@ import {
   selectContent,
   updateContent,
 } from "./modules/content";
-import { Button, Menu } from "antd";
+import { Button, Form, Menu, Modal, PageHeader } from "antd";
 import { db } from "./index";
 import { useDebouncedCallback } from "use-debounce";
 import { updateStores } from "./modules/app";
+import { TextEditor, useAutoComplete } from "./components/TextEditor";
+import { ReflexContainer, ReflexSplitter, ReflexElement } from "react-reflex";
+import * as monaco from "monaco-editor";
 
 interface DirectoryProps {
-  editorValue?: string;
-  editorRef: RefObject<MonacoEditor>;
   onClickNew?: () => void;
-  onClickSelectContent?: () => void;
+  onClickSelectContent?: (contentId?: string) => void;
 }
 
 function Directory(props: DirectoryProps) {
   const dispatch = useDispatch();
-  const entities = useKeyEntities();
   const { content, selectedContent } = useSelector((state: RootState) => {
     const { content, selectedContentId } = state.content;
     const selectedContent = state.content.content.find(
@@ -36,38 +45,17 @@ function Directory(props: DirectoryProps) {
     return {
       selectedContent,
       content,
-      entities,
     };
   });
 
   function onClickNew() {
-    if (selectedContent && props.editorValue) {
-      dispatch(
-        updateContent({
-          ...selectedContent,
-          text: props.editorValue,
-        })
-      );
-    }
     dispatch(addNewContent());
-
-    props.editorRef?.current?.editor?.focus();
     props.onClickNew && props.onClickNew();
   }
 
   const onClickSelectContent = (contentId: string) => () => {
-    if (selectedContent && props.editorValue) {
-      if (selectedContent.text !== props.editorValue) {
-        dispatch(
-          updateContent({
-            ...selectedContent,
-            text: props.editorValue,
-          })
-        );
-      }
-    }
     dispatch(selectContent(contentId));
-    props.onClickSelectContent && props.onClickSelectContent();
+    props.onClickSelectContent && props.onClickSelectContent(contentId);
   };
 
   const onSaveContentName = (content: Content) => (value: string) => {
@@ -80,62 +68,73 @@ function Directory(props: DirectoryProps) {
   };
 
   return (
-    <Menu
-      selectedKeys={selectedContent ? [selectedContent._id.toString()] : []}
-      mode={"inline"}
-    >
-      <Menu.ItemGroup title={"My Workbook"}>
-        {content.map((cont) => {
-          return (
-            <Menu.Item onClick={onClickSelectContent(cont._id)} key={cont._id}>
-              <Editable value={cont.name} onSave={onSaveContentName(cont)} />
-            </Menu.Item>
-          );
-        })}
-        <Menu.Item>
-          <Button onClick={onClickNew} type={"primary"}>
-            Add New
-          </Button>
-        </Menu.Item>
-      </Menu.ItemGroup>
-    </Menu>
+    <>
+      <Menu
+        selectedKeys={selectedContent ? [selectedContent._id.toString()] : []}
+        mode={"inline"}
+      >
+        <Menu.ItemGroup title={"My Workbook"}>
+          {content.map((cont) => {
+            return (
+              <Menu.Item
+                onClick={onClickSelectContent(cont._id)}
+                key={cont._id}
+              >
+                <Editable value={cont.name} onSave={onSaveContentName(cont)} />
+              </Menu.Item>
+            );
+          })}
+          <Menu.Item>
+            <Button onClick={onClickNew} type={"primary"}>
+              Add New
+            </Button>
+          </Menu.Item>
+        </Menu.ItemGroup>
+      </Menu>
+    </>
   );
 }
 
-function useKeyEntities() {
-  const { entities } = useSelector((state: RootState) => state.entities);
-
-  const keyEntities: Entity[] = [];
-
-  entities.forEach((entity) => {
-    entity.entities.forEach((entity) => {
-      keyEntities.push(entity);
-    });
-  });
-
-  return keyEntities;
-}
-
 function App() {
+  const monacoRef = useRef(monaco);
+  // TODO: DONT USE REF, USE INSTANCE DIRECTLY
+  useAutoComplete(monacoRef);
   const dispatch = useDispatch();
-  const { selectedContent } = useSelector((state: RootState) => {
+  const contentEditorRef = useRef<MonacoEditor>(null);
+  const entityEditorRef = useRef<MonacoEditor>(null);
+  const {
+    selectedContent,
+    selectedEntity,
+    showDeleteEntityModal,
+  } = useSelector((state: RootState) => {
     const { selectedContentId } = state.content;
     const selectedContent = state.content.content.find(
       (c) => c._id === selectedContentId
     );
 
+    const {
+      selectedEntityId,
+      entitiesIndex,
+      showEditEntityModal,
+      showDeleteEntityModal,
+      editSettingsEntityId,
+    } = state.entities;
+    const selectedEntity = selectedEntityId
+      ? entitiesIndex[selectedEntityId]
+      : undefined;
+    const editSettingsEntity = editSettingsEntityId
+      ? entitiesIndex[editSettingsEntityId]
+      : undefined;
+
     return {
       selectedContent,
+      selectedEntity,
+      showEditEntityModal,
+      showDeleteEntityModal,
+      editSettingsEntity,
     };
   });
-
-  const [value, setValue] = useState<string | undefined>(selectedContent?.text);
-  const keyEntities = useKeyEntities();
-  const monacoRef = useRef<typeof monacoEditor>();
-  const ref = useRef<MonacoEditor>(null);
-
   const [debouncedCallback, cancel] = useDebouncedCallback((value: string) => {
-    console.log(value, "value");
     if (selectedContent) {
       dispatch(
         updateContent({
@@ -147,199 +146,151 @@ function App() {
   }, 1000);
 
   useEffect(() => {
-    if (selectedContent) {
-      setValue(selectedContent.text);
-    }
-  }, [selectedContent]);
-
-  function editorWillMount(monaco: typeof monacoEditor) {
-    monacoRef.current = monaco;
-  }
-
-  React.useEffect(() => {
     db.bulkDocs([...entityDocuments, ...contentFixture])
       .catch((e) => e)
       .finally(async () => {
-        await dispatch(updateStores());
+        dispatch(updateStores());
         dispatch(selectContent("100"));
       });
   }, [dispatch]);
 
-  useEffect(() => {
-    function createDependencyProposals(range: monacoEditor.IRange) {
-      return keyEntities
-        .filter((entity) => entity.shouldAutoComplete)
-        .map((entity) => {
-          return {
-            label: entity.name,
-            kind: monacoEditor.languages.CompletionItemKind.Function,
-            insertText: entity.name,
-            range,
-          };
-        });
+  function cancelAndUpdateContent() {
+    cancel();
+
+    const text = contentEditorRef?.current?.editor?.getValue();
+
+    if (selectedContent && text) {
+      dispatch(
+        updateContent({
+          ...selectedContent,
+          text,
+        })
+      );
     }
+  }
 
-    const hover = monacoRef?.current?.languages.registerHoverProvider(
-      "markdown",
-      {
-        provideHover: function (model, position) {
-          const contents = keyEntities
-            .filter(
-              (entity) =>
-                model.getWordAtPosition(position)?.word === entity.name
-            )
-            .map((entity) => {
-              return {
-                value:
-                  "Cmd + click to go to " +
-                  entity.name +
-                  "\n\n" +
-                  "## *" +
-                  entity.name +
-                  " docs here*",
-              };
-            });
+  function onClickSelectContent() {
+    cancelAndUpdateContent();
+  }
 
-          return {
-            contents,
-          };
-        },
-      }
-    );
-
-    const completion = monacoRef?.current?.languages.registerCompletionItemProvider(
-      "markdown",
-      {
-        provideCompletionItems: function (model, position) {
-          const word = model.getWordUntilPosition(position);
-          const range = {
-            startLineNumber: position.lineNumber,
-            endLineNumber: position.lineNumber,
-            startColumn: word.startColumn,
-            endColumn: word.endColumn,
-          };
-          return {
-            suggestions: createDependencyProposals(range),
-          };
-        },
-      }
-    );
-
-    return () => {
-      hover?.dispose();
-      completion?.dispose();
-    };
-  }, [keyEntities]);
-
-  useEffect(() => {
-    const providerMap = keyEntities.map((entity) => {
-      const commandId = ref?.current?.editor?.addCommand(
-        0,
-        function () {
-          dispatch(selectEntities([entity._id]));
-        },
-        ""
-      );
-
-      const provider = monacoRef?.current?.languages.registerCodeLensProvider(
-        "markdown",
-        {
-          provideCodeLenses: function (model, token) {
-            const matches = model
-              .findMatches(entity.name, true, false, true, null, true)
-              .reduce((acc, current) => {
-                const dupe = acc.find(
-                  (item) =>
-                    item.range.startLineNumber === current.range.startLineNumber
-                );
-
-                if (!dupe) {
-                  return acc.concat([current]);
-                }
-
-                return acc;
-              }, [] as monacoEditor.editor.FindMatch[]);
-
-            const lenses: monacoEditor.languages.CodeLens[] = matches.map(
-              (match) => {
-                return {
-                  range: match.range,
-                  command: {
-                    id: commandId ?? "",
-                    title: `@${entity.name}`,
-                  },
-                };
-              }
-            );
-
-            return {
-              dispose: () => undefined,
-              lenses,
-            };
-          },
-        }
-      );
-
-      return { provider };
-    });
-
-    return () => {
-      providerMap.forEach((provider) => {
-        provider.provider?.dispose();
-      });
-    };
-  }, [dispatch, keyEntities]);
+  function onClickNew() {
+    cancelAndUpdateContent();
+    contentEditorRef?.current?.editor?.focus();
+  }
 
   return (
     <div style={{ height: "100%" }}>
-      <div
-        style={{
-          height: "100%",
-          display: "flex",
-          paddingTop: "1rem",
-          paddingBottom: "1rem",
-        }}
-      >
-        <div style={{ flex: 1, paddingLeft: "1rem", paddingRight: "1rem" }}>
+      <ReflexContainer orientation="vertical">
+        <ReflexElement flex={0.5}>
           <Directory
-            onClickSelectContent={cancel}
-            onClickNew={cancel}
-            editorRef={ref}
-            editorValue={value}
+            onClickSelectContent={onClickSelectContent}
+            onClickNew={onClickNew}
           />
-        </div>
-        <div style={{ flex: 2 }}>
-          <MonacoEditor
-            onChange={(text) => {
-              if (selectedContent) {
-                setValue(text);
+        </ReflexElement>
+        <ReflexSplitter
+          propagate={true}
+          onResize={() => {
+            contentEditorRef?.current?.editor?.layout();
+            entityEditorRef?.current?.editor?.layout();
+          }}
+        />
+        <ReflexElement flex={2}>
+          <div style={{ height: "100%", width: "100%" }}>
+            <TextEditor
+              ref={contentEditorRef}
+              onChange={(text) => {
                 debouncedCallback(text);
-              }
-            }}
-            ref={ref}
-            value={value}
-            language="markdown"
-            theme="vs-dark"
-            editorWillMount={editorWillMount}
-            options={{
-              contextmenu: false,
-              gotoLocation: {
-                multiple: "goto",
-                multipleDeclarations: "goto",
-                multipleDefinitions: "goto",
-                multipleImplementations: "goto",
-                multipleReferences: "goto",
-                multipleTypeDefinitions: "goto",
-              },
-            }}
-          />
-        </div>
-        <div style={{ flex: 1.5, paddingLeft: "1rem", paddingRight: "1rem" }}>
-          <EntityEditor />
-        </div>
-      </div>
+              }}
+              value={selectedContent?.text}
+            />
+          </div>
+        </ReflexElement>
+        <ReflexSplitter
+          propagate={true}
+          onResize={() => {
+            contentEditorRef?.current?.editor?.layout();
+            entityEditorRef?.current?.editor?.layout();
+          }}
+        />
+        <ReflexElement flex={1.5}>
+          <div style={{ height: "100%", width: "100%" }}>
+            {selectedEntity ? (
+              <div style={{ height: "100%", width: "100%" }}>
+                <PageHeader
+                  onBack={() => dispatch(selectEntity())}
+                  title={selectedEntity?.name}
+                  extra={[
+                    <Button onClick={() => dispatch(setEditEntityModal(true))}>
+                      Config
+                    </Button>,
+                  ]}
+                />
+                <TextEditor
+                  ref={entityEditorRef}
+                  onChange={(text) => {
+                    console.log(text, "text");
+                  }}
+                  value={selectedEntity?.description}
+                />
+              </div>
+            ) : (
+              <EntityListContainer />
+            )}
+          </div>
+        </ReflexElement>
+      </ReflexContainer>
+      <EditEntitySettingsModal />
+      <Modal
+        title={"Delete Entity"}
+        onCancel={() => dispatch(setDeleteEntityModal(false))}
+        onOk={() => dispatch(setDeleteEntityModal(false))}
+        visible={showDeleteEntityModal}
+      >
+        Delete Entity
+      </Modal>
     </div>
   );
 }
+
+const EditEntitySettingsModal = () => {
+  const dispatch = useDispatch();
+  const [form] = Form.useForm();
+  const { showEditEntityModal, editSettingsEntity } = useSelector(
+    (state: RootState) => {
+      const {
+        showEditEntityModal,
+        editSettingsEntityId,
+        entitiesIndex,
+      } = state.entities;
+      const editSettingsEntity = editSettingsEntityId
+        ? entitiesIndex[editSettingsEntityId]
+        : undefined;
+
+      return {
+        showEditEntityModal,
+        editSettingsEntity,
+      };
+    }
+  );
+
+  const onOk = () => {
+    form.submit();
+  };
+
+  function hideEntityModal() {
+    dispatch(setEditEntityModal(false));
+  }
+
+  return (
+    <Modal
+      title={editSettingsEntity ? "Edit Entity" : "Add Entity"}
+      onCancel={hideEntityModal}
+      visible={showEditEntityModal}
+      onOk={onOk}
+    >
+      <EditEntitySettings form={form} />
+    </Modal>
+  );
+};
 
 export default App;

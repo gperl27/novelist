@@ -4,10 +4,13 @@ import { AppThunk } from "./index";
 import { updateStores } from "./app";
 
 export enum EntityTypes {
-  AddEntity = "ADD_ENTITY",
   SetEntityStore = "SET_ENTITY_STORE",
   SelectEntities = "SELECT_ENTITIES",
   UpdateEntity = "UPDATE_ENTITY",
+  SelectEntity = "SELECT_ENTITY",
+  SetDeleteEntityModal = "SET_DELETE_ENTITY_MODAL",
+  SetEditEntityModal = "SET_EDIT_ENTITY_MODAL",
+  SelectEditSettingsEntity = "SELECT_EDIT_SETTINGS_ENTITY",
 }
 
 interface SelectEntities {
@@ -25,75 +28,119 @@ interface SetEntityStore {
   payload: Partial<EntityState>;
 }
 
-interface AddEntity {
-  type: EntityTypes.AddEntity;
-  payload: Entity;
+interface SelectEntity {
+  type: EntityTypes.SelectEntity;
+  payload: string | undefined;
+}
+
+interface SelectEditEntitySettings {
+  type: EntityTypes.SelectEditSettingsEntity;
+  payload: string | undefined;
+}
+
+interface SetEditEntityModal {
+  type: EntityTypes.SetEditEntityModal;
+  payload: boolean;
+}
+
+interface SetDeleteEntityModal {
+  type: EntityTypes.SetDeleteEntityModal;
+  payload: boolean;
 }
 
 type EntityActionTypes =
   | SelectEntities
   | UpdateEntity
   | SetEntityStore
-  | AddEntity;
+  | SelectEntity
+  | SetEditEntityModal
+  | SetDeleteEntityModal
+  | SelectEditEntitySettings;
 
-export function selectEntities(entityIds: string[]): EntityActionTypes {
+export function selectEntity(entityId?: string): EntityActionTypes {
   return {
-    type: EntityTypes.SelectEntities,
-    payload: entityIds,
+    type: EntityTypes.SelectEntity,
+    payload: entityId,
   };
 }
 
-export const deselectEntities = (entityIds: string[]): AppThunk => async (
-  dispatch,
-  getState
-) => {
-  const currentlySelectedIds = getState().entities.selectedEntityIds;
-  const idsAfterDeselecting = currentlySelectedIds.filter(
-    (id) => entityIds.indexOf(id) === -1
-  );
-
-  dispatch({
-    type: EntityTypes.SelectEntities,
-    payload: idsAfterDeselecting,
-  });
-};
-
-export const updateEntity = (entity: Entity): AppThunk => async (dispatch) => {
-  const dbEntity = {
-    ...entity,
-    entities: entity.entities.map((entity) => entity._id),
+export function selectEditSettingsEntity(entityId?: string): EntityActionTypes {
+  return {
+    type: EntityTypes.SelectEditSettingsEntity,
+    payload: entityId,
   };
+}
 
-  await db.put(dbEntity);
+export function setEditEntityModal(isShowing: boolean) {
+  return {
+    type: EntityTypes.SetEditEntityModal,
+    payload: isShowing,
+  };
+}
+
+export function setDeleteEntityModal(isShowing: boolean) {
+  return {
+    type: EntityTypes.SetDeleteEntityModal,
+    payload: isShowing,
+  };
+}
+
+function isEntity(entity: any): entity is Entity {
+  return entity.entities.every(
+    (ent: any): ent is Entity => typeof ent._id !== "undefined"
+  );
+}
+
+function areEntities(entities: any[]): entities is Entity[] {
+  return entities.every(isEntity);
+}
+
+export const updateEntities = (
+  entities:
+    | Omit<Entity, "_rev">
+    | Omit<Entity, "_rev">[]
+    | Omit<DbEntity, "_rev">
+    | Omit<DbEntity, "_rev">[]
+): AppThunk => async (dispatch) => {
+  let updatedEntities = Array.isArray(entities) ? entities : [entities];
+  if (areEntities(updatedEntities)) {
+    updatedEntities = updatedEntities.map((entity) => {
+      return {
+        ...entity,
+        entities: entity.entities.map((entity) => entity._id),
+      };
+    });
+  }
+
+  await db.bulkDocs(updatedEntities);
   await dispatch(updateStores());
 };
 
-export const addEntity = (parentEntity: Entity): AppThunk => async (
-  dispatch,
-  getState
-) => {
+export const addEntity = (
+  entity: Pick<Entity, "name" | "shouldDeepLink" | "shouldAutoComplete">,
+  parentEntity?: Entity
+): AppThunk => async (dispatch) => {
   const _id = uuidv4();
   const dbEntity: Omit<Entity, "_rev"> = {
+    ...entity,
     _id,
-    descriptors: [],
-    name: "Untitled",
-    entity: parentEntity._id,
+    description: "",
+    isEditing: false,
+    entity: parentEntity ? parentEntity._id : undefined,
     type: "entity",
     entities: [],
-    isEditing: true,
-    shouldAutoComplete: false,
-    shouldDeepLink: false,
   };
 
-  await db.put(dbEntity);
-  await dispatch(
-    updateEntity({
+  const updatedEntities = [dbEntity];
+
+  if (parentEntity) {
+    updatedEntities.push({
       ...parentEntity,
       entities: parentEntity.entities.concat(dbEntity as Entity),
-    })
-  );
-  const ids = getState().entities.selectedEntityIds.concat(_id);
-  dispatch(selectEntities(ids));
+    });
+  }
+
+  await dispatch(updateEntities(updatedEntities));
 };
 
 export function setEntityStore(store: Partial<EntityState>): EntityActionTypes {
@@ -103,13 +150,6 @@ export function setEntityStore(store: Partial<EntityState>): EntityActionTypes {
   };
 }
 
-export interface DescriptorBase {
-  name: string;
-}
-export type Traits = DescriptorBase & { traits: string[] };
-export type Description = DescriptorBase & { description: string };
-export type Descriptor = Traits | Description;
-
 export type PersistenceSchema = PouchDB.Core.IdMeta &
   PouchDB.Core.GetMeta & {
     type: string;
@@ -117,7 +157,7 @@ export type PersistenceSchema = PouchDB.Core.IdMeta &
 
 export interface Entity extends PersistenceSchema {
   name: string;
-  descriptors: Descriptor[];
+  description: string;
   entity?: string;
   entities: Entity[];
   shouldAutoComplete: boolean;
@@ -128,13 +168,18 @@ export interface Entity extends PersistenceSchema {
 export interface EntityState {
   entitiesIndex: { [key: string]: DbEntity };
   entities: Entity[];
+  flatEntities: DbEntity[];
   selectedEntityIds: string[];
+  selectedEntityId?: string;
+  editSettingsEntityId?: string;
+  showEditEntityModal: boolean;
+  showDeleteEntityModal: boolean;
 }
 
 export const entityDocuments: Omit<DbEntity, "_rev">[] = [
   {
     _id: "1",
-    descriptors: [],
+    description: "",
     type: "entity",
     name: "Characters",
     entities: ["2"],
@@ -144,7 +189,7 @@ export const entityDocuments: Omit<DbEntity, "_rev">[] = [
   },
   {
     _id: "2",
-    descriptors: [],
+    description: "",
     type: "entity",
     name: "Kubo",
     entity: "1",
@@ -155,7 +200,8 @@ export const entityDocuments: Omit<DbEntity, "_rev">[] = [
   },
   {
     _id: "3",
-    descriptors: [],
+
+    description: "",
     type: "entity",
     name: "Plot",
     entities: ["4"],
@@ -165,7 +211,7 @@ export const entityDocuments: Omit<DbEntity, "_rev">[] = [
   },
   {
     _id: "4",
-    descriptors: [],
+    description: "",
     type: "entity",
     entity: "3",
     entities: [],
@@ -180,6 +226,9 @@ const initialState: EntityState = {
   entitiesIndex: {},
   selectedEntityIds: [],
   entities: [],
+  flatEntities: [],
+  showDeleteEntityModal: false,
+  showEditEntityModal: false,
 };
 
 export function entitiesReducer(
@@ -198,6 +247,29 @@ export function entitiesReducer(
         ...action.payload,
       };
     }
+    case EntityTypes.SelectEntity: {
+      return {
+        ...state,
+        selectedEntityId: action.payload,
+      };
+    }
+    case EntityTypes.SelectEditSettingsEntity: {
+      return {
+        ...state,
+        editSettingsEntityId: action.payload,
+      };
+    }
+    case EntityTypes.SetEditEntityModal:
+      return {
+        ...state,
+        showEditEntityModal: action.payload,
+      };
+    case EntityTypes.SetDeleteEntityModal:
+      return {
+        ...state,
+        showDeleteEntityModal: action.payload,
+      };
+
     default:
       return state;
   }

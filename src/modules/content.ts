@@ -63,9 +63,9 @@ export const addNewContent = (title?: string): AppThunk => async (dispatch) => {
     type: "content",
   };
 
+  dispatch(selectContent(_id));
   await db.put(content);
   await dispatch(updateStores());
-  dispatch(selectContent(_id));
 };
 
 export function setContentStore(store: ContentState): ContentActionTypes {

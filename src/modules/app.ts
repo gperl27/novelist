@@ -40,6 +40,7 @@ export const updateStores = (): AppThunk => async (dispatch) => {
     dispatch(
       setEntityStore({
         entitiesIndex,
+        flatEntities: entities as DbEntity[],
         entities: flatToHierarchy(
           entities as DbEntity[],
           undefined,
