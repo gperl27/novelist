@@ -1,42 +1,44 @@
 import * as React from "react";
+import {
+  ChangeEvent,
+  ComponentProps,
+  createElement,
+  useEffect,
+  useState,
+} from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "../modules";
 import {
   addEntity,
+  EditEntityModes,
   Entity,
   selectEditSettingsEntity,
   selectEntity,
-  setDeleteEntityModal,
   setEditEntityModal,
   updateEntities,
 } from "../modules/entities";
 import {
   Button,
-  Tag,
-  Input,
-  Tree,
   Collapse,
-  PageHeader,
   Dropdown,
-  Menu,
-  Form,
   Empty,
+  Form,
+  Input,
+  Menu,
+  Modal,
+  PageHeader,
+  Tag,
+  Tree,
+  Switch,
 } from "antd";
 import {
-  ChangeEvent,
-  ComponentProps,
-  createElement,
-  useState,
-  useEffect,
-} from "react";
-import {
-  EditOutlined,
   CheckOutlined,
+  EditOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
-import { DbEntity } from "../index";
 import { ClickParam } from "antd/lib/menu";
 import { FormInstance } from "antd/lib/form";
+import { ExclamationCircleOutlined } from "@ant-design/icons/lib";
 
 export function transformEntitiesToTreedData(
   entities: Entity[]
@@ -136,7 +138,7 @@ export function EntityListContainer() {
 
   function onClickAddEntity() {
     dispatch(selectEditSettingsEntity());
-    dispatch(setEditEntityModal(true));
+    dispatch(setEditEntityModal(true, EditEntityModes.Add));
   }
 
   return (
@@ -165,25 +167,40 @@ export function EntityList(props: EntityListProps) {
     dispatch(selectEntity(id));
   };
 
-  function addEntity() {
-    dispatch(selectEditSettingsEntity());
-    dispatch(setEditEntityModal(true));
+  function onAddEntity(id: string) {
+    dispatch(selectEditSettingsEntity(id));
+    dispatch(setEditEntityModal(true, EditEntityModes.Add));
   }
 
-  function onAddEntity(e: ClickParam) {
+  const onAddEntityFromMenu = (id: string) => (e: ClickParam) => {
     e.domEvent.stopPropagation();
-    addEntity();
-  }
+    onAddEntity(id);
+  };
 
   const onEditSettings = (id: string) => (e: ClickParam) => {
     e.domEvent.stopPropagation();
-    dispatch(setEditEntityModal(true));
+    dispatch(setEditEntityModal(true, EditEntityModes.Edit));
     dispatch(selectEditSettingsEntity(id));
   };
 
-  const onDeleteEntity = (id: string) => (e: ClickParam) => {
+  const onDeleteEntity = (entity: Entity) => (e: ClickParam) => {
     e.domEvent.stopPropagation();
-    dispatch(setDeleteEntityModal(true));
+
+    Modal.confirm({
+      title: "Are you sure delete this entity?",
+      icon: <ExclamationCircleOutlined />,
+      okText: "Delete",
+      okType: "danger",
+      cancelText: "Cancel",
+      onOk() {
+        dispatch(
+          updateEntities({
+            ...entity,
+            _deleted: true,
+          })
+        );
+      },
+    });
   };
 
   return (
@@ -198,13 +215,15 @@ export function EntityList(props: EntityListProps) {
                   trigger={["click"]}
                   overlay={
                     <Menu>
-                      <Menu.Item onClick={onAddEntity}>Add entity</Menu.Item>
+                      <Menu.Item onClick={onAddEntityFromMenu(entity._id)}>
+                        Add entity
+                      </Menu.Item>
                       <Menu.Item onClick={onEditSettings(entity._id)}>
                         Edit entity
                       </Menu.Item>
                       <Menu.Divider />
                       <Menu.Item
-                        onClick={onDeleteEntity(entity._id)}
+                        onClick={onDeleteEntity(entity)}
                         style={{ color: "red" }}
                       >
                         Delete
@@ -227,7 +246,10 @@ export function EntityList(props: EntityListProps) {
                     <div style={{ marginTop: "1rem", marginBottom: "1rem" }}>
                       or
                     </div>
-                    <Button type={"primary"} onClick={addEntity}>
+                    <Button
+                      type={"primary"}
+                      onClick={() => onAddEntity(entity._id)}
+                    >
                       Add a new entity
                     </Button>
                   </Empty>
@@ -262,27 +284,36 @@ interface EditEntitySettingsProps {
 export const EditEntitySettings = (props: EditEntitySettingsProps) => {
   const dispatch = useDispatch();
   const [form] = Form.useForm(props.form);
-  const { entity } = useSelector((state: RootState) => {
-    const { editSettingsEntityId, entitiesIndex } = state.entities;
+  const { entity, editEntityMode } = useSelector((state: RootState) => {
+    const {
+      editSettingsEntityId,
+      entitiesIndex,
+      editEntityMode,
+    } = state.entities;
     const entity = editSettingsEntityId
       ? entitiesIndex[editSettingsEntityId]
       : undefined;
 
     return {
       entity,
+      editEntityMode,
     };
   });
 
   useEffect(() => {
-    console.log(entity, "entity");
     form.setFieldsValue({
-      name: entity ? entity.name : "",
+      name: editEntityMode === EditEntityModes.Edit ? entity?.name : "",
+      shouldAutoComplete:
+        editEntityMode === EditEntityModes.Edit
+          ? entity?.shouldAutoComplete
+          : true,
+      parentId: entity?._id,
     });
-  }, [entity]);
+  }, [entity, editEntityMode]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function onSaveEntity(values: { [name: string]: any }) {
-    if (entity) {
+    if (editEntityMode === EditEntityModes.Edit && entity) {
       await dispatch(
         updateEntities({
           ...entity,
@@ -294,11 +325,14 @@ export const EditEntitySettings = (props: EditEntitySettingsProps) => {
       );
     } else {
       dispatch(
-        addEntity({
-          name: values.name,
-          shouldDeepLink: values.shouldDeepLink,
-          shouldAutoComplete: values.shouldAutoComplete,
-        })
+        addEntity(
+          {
+            name: values.name,
+            shouldDeepLink: values.shouldDeepLink,
+            shouldAutoComplete: values.shouldAutoComplete,
+          },
+          values.parentId
+        )
       );
     }
 
@@ -313,16 +347,31 @@ export const EditEntitySettings = (props: EditEntitySettingsProps) => {
     <Form
       form={form}
       initialValues={{
-        name: entity?.name,
+        name: editEntityMode === EditEntityModes.Edit ? entity?.name : "",
+        shouldAutoComplete:
+          editEntityMode === EditEntityModes.Edit
+            ? entity?.shouldAutoComplete
+            : true,
+        parentId: entity?.entity,
       }}
       onFinish={onSaveEntity}
     >
+      <Form.Item style={{ display: "none" }} name={"parentId"}>
+        <Input type={"hidden"} />
+      </Form.Item>
       <Form.Item
         label={"Entity Name"}
         name={"name"}
         rules={[{ required: true }]}
       >
-        <Input placeholder={"Untitled"} name={"name"} />
+        <Input placeholder={"Untitled"} />
+      </Form.Item>
+      <Form.Item
+        valuePropName={"checked"}
+        label={"Autocomplete"}
+        name={"shouldAutoComplete"}
+      >
+        <Switch />
       </Form.Item>
     </Form>
   );

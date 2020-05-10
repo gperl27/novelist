@@ -4,9 +4,10 @@ import MonacoEditor from "react-monaco-editor";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "./modules";
 import {
+  EditEntityModes,
   entityDocuments,
+  selectEditSettingsEntity,
   selectEntity,
-  setDeleteEntityModal,
   setEditEntityModal,
 } from "./modules/entities";
 import {
@@ -26,7 +27,7 @@ import { db } from "./index";
 import { useDebouncedCallback } from "use-debounce";
 import { updateStores } from "./modules/app";
 import { TextEditor, useAutoComplete } from "./components/TextEditor";
-import { ReflexContainer, ReflexSplitter, ReflexElement } from "react-reflex";
+import { ReflexContainer, ReflexElement, ReflexSplitter } from "react-reflex";
 import * as monaco from "monaco-editor";
 
 interface DirectoryProps {
@@ -102,38 +103,34 @@ function App() {
   const dispatch = useDispatch();
   const contentEditorRef = useRef<MonacoEditor>(null);
   const entityEditorRef = useRef<MonacoEditor>(null);
-  const {
-    selectedContent,
-    selectedEntity,
-    showDeleteEntityModal,
-  } = useSelector((state: RootState) => {
-    const { selectedContentId } = state.content;
-    const selectedContent = state.content.content.find(
-      (c) => c._id === selectedContentId
-    );
+  const { selectedContent, selectedEntity } = useSelector(
+    (state: RootState) => {
+      const { selectedContentId } = state.content;
+      const selectedContent = state.content.content.find(
+        (c) => c._id === selectedContentId
+      );
 
-    const {
-      selectedEntityId,
-      entitiesIndex,
-      showEditEntityModal,
-      showDeleteEntityModal,
-      editSettingsEntityId,
-    } = state.entities;
-    const selectedEntity = selectedEntityId
-      ? entitiesIndex[selectedEntityId]
-      : undefined;
-    const editSettingsEntity = editSettingsEntityId
-      ? entitiesIndex[editSettingsEntityId]
-      : undefined;
+      const {
+        selectedEntityId,
+        entitiesIndex,
+        showEditEntityModal,
+        editSettingsEntityId,
+      } = state.entities;
+      const selectedEntity = selectedEntityId
+        ? entitiesIndex[selectedEntityId]
+        : undefined;
+      const editSettingsEntity = editSettingsEntityId
+        ? entitiesIndex[editSettingsEntityId]
+        : undefined;
 
-    return {
-      selectedContent,
-      selectedEntity,
-      showEditEntityModal,
-      showDeleteEntityModal,
-      editSettingsEntity,
-    };
-  });
+      return {
+        selectedContent,
+        selectedEntity,
+        showEditEntityModal,
+        editSettingsEntity,
+      };
+    }
+  );
   const [debouncedCallback, cancel] = useDebouncedCallback((value: string) => {
     if (selectedContent) {
       dispatch(
@@ -220,8 +217,15 @@ function App() {
                   onBack={() => dispatch(selectEntity())}
                   title={selectedEntity?.name}
                   extra={[
-                    <Button onClick={() => dispatch(setEditEntityModal(true))}>
-                      Config
+                    <Button
+                      onClick={() => {
+                        dispatch(selectEditSettingsEntity(selectedEntity?._id));
+                        dispatch(
+                          setEditEntityModal(true, EditEntityModes.Edit)
+                        );
+                      }}
+                    >
+                      Settings
                     </Button>,
                   ]}
                 />
@@ -240,14 +244,6 @@ function App() {
         </ReflexElement>
       </ReflexContainer>
       <EditEntitySettingsModal />
-      <Modal
-        title={"Delete Entity"}
-        onCancel={() => dispatch(setDeleteEntityModal(false))}
-        onOk={() => dispatch(setDeleteEntityModal(false))}
-        visible={showDeleteEntityModal}
-      >
-        Delete Entity
-      </Modal>
     </div>
   );
 }
@@ -255,12 +251,13 @@ function App() {
 const EditEntitySettingsModal = () => {
   const dispatch = useDispatch();
   const [form] = Form.useForm();
-  const { showEditEntityModal, editSettingsEntity } = useSelector(
+  const { showEditEntityModal, editEntityMode } = useSelector(
     (state: RootState) => {
       const {
         showEditEntityModal,
         editSettingsEntityId,
         entitiesIndex,
+        editEntityMode,
       } = state.entities;
       const editSettingsEntity = editSettingsEntityId
         ? entitiesIndex[editSettingsEntityId]
@@ -269,6 +266,7 @@ const EditEntitySettingsModal = () => {
       return {
         showEditEntityModal,
         editSettingsEntity,
+        editEntityMode,
       };
     }
   );
@@ -283,7 +281,9 @@ const EditEntitySettingsModal = () => {
 
   return (
     <Modal
-      title={editSettingsEntity ? "Edit Entity" : "Add Entity"}
+      title={
+        editEntityMode === EditEntityModes.Edit ? "Edit Entity" : "Add Entity"
+      }
       onCancel={hideEntityModal}
       visible={showEditEntityModal}
       onOk={onOk}

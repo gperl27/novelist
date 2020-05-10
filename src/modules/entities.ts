@@ -3,12 +3,16 @@ import { v4 as uuidv4 } from "uuid";
 import { AppThunk } from "./index";
 import { updateStores } from "./app";
 
+export enum EditEntityModes {
+  Add,
+  Edit,
+}
+
 export enum EntityTypes {
   SetEntityStore = "SET_ENTITY_STORE",
   SelectEntities = "SELECT_ENTITIES",
   UpdateEntity = "UPDATE_ENTITY",
   SelectEntity = "SELECT_ENTITY",
-  SetDeleteEntityModal = "SET_DELETE_ENTITY_MODAL",
   SetEditEntityModal = "SET_EDIT_ENTITY_MODAL",
   SelectEditSettingsEntity = "SELECT_EDIT_SETTINGS_ENTITY",
 }
@@ -40,12 +44,10 @@ interface SelectEditEntitySettings {
 
 interface SetEditEntityModal {
   type: EntityTypes.SetEditEntityModal;
-  payload: boolean;
-}
-
-interface SetDeleteEntityModal {
-  type: EntityTypes.SetDeleteEntityModal;
-  payload: boolean;
+  payload: {
+    showEditEntityModal: boolean;
+    mode?: EditEntityModes;
+  };
 }
 
 type EntityActionTypes =
@@ -54,7 +56,6 @@ type EntityActionTypes =
   | SetEntityStore
   | SelectEntity
   | SetEditEntityModal
-  | SetDeleteEntityModal
   | SelectEditEntitySettings;
 
 export function selectEntity(entityId?: string): EntityActionTypes {
@@ -71,17 +72,16 @@ export function selectEditSettingsEntity(entityId?: string): EntityActionTypes {
   };
 }
 
-export function setEditEntityModal(isShowing: boolean) {
+export function setEditEntityModal(
+  isShowing: boolean,
+  mode?: EditEntityModes
+): EntityActionTypes {
   return {
     type: EntityTypes.SetEditEntityModal,
-    payload: isShowing,
-  };
-}
-
-export function setDeleteEntityModal(isShowing: boolean) {
-  return {
-    type: EntityTypes.SetDeleteEntityModal,
-    payload: isShowing,
+    payload: {
+      showEditEntityModal: isShowing,
+      mode,
+    },
   };
 }
 
@@ -96,11 +96,7 @@ function areEntities(entities: any[]): entities is Entity[] {
 }
 
 export const updateEntities = (
-  entities:
-    | Omit<Entity, "_rev">
-    | Omit<Entity, "_rev">[]
-    | Omit<DbEntity, "_rev">
-    | Omit<DbEntity, "_rev">[]
+  entities: Omit<Entity | DbEntity, "_rev"> | Omit<Entity | DbEntity, "_rev">[]
 ): AppThunk => async (dispatch) => {
   let updatedEntities = Array.isArray(entities) ? entities : [entities];
   if (areEntities(updatedEntities)) {
@@ -118,25 +114,26 @@ export const updateEntities = (
 
 export const addEntity = (
   entity: Pick<Entity, "name" | "shouldDeepLink" | "shouldAutoComplete">,
-  parentEntity?: Entity
-): AppThunk => async (dispatch) => {
+  parentId?: string
+): AppThunk => async (dispatch, getState) => {
   const _id = uuidv4();
-  const dbEntity: Omit<Entity, "_rev"> = {
+  const dbEntity: Omit<Entity | DbEntity, "_rev"> = {
     ...entity,
     _id,
     description: "",
     isEditing: false,
-    entity: parentEntity ? parentEntity._id : undefined,
+    entity: parentId,
     type: "entity",
     entities: [],
   };
 
   const updatedEntities = [dbEntity];
 
-  if (parentEntity) {
+  if (parentId) {
+    const parentEntity = getState().entities.entitiesIndex[parentId];
     updatedEntities.push({
       ...parentEntity,
-      entities: parentEntity.entities.concat(dbEntity as Entity),
+      entities: parentEntity.entities.concat(dbEntity._id),
     });
   }
 
@@ -151,7 +148,8 @@ export function setEntityStore(store: Partial<EntityState>): EntityActionTypes {
 }
 
 export type PersistenceSchema = PouchDB.Core.IdMeta &
-  PouchDB.Core.GetMeta & {
+  PouchDB.Core.GetMeta &
+  PouchDB.Core.ChangesMeta & {
     type: string;
   };
 
@@ -163,6 +161,7 @@ export interface Entity extends PersistenceSchema {
   shouldAutoComplete: boolean;
   shouldDeepLink: boolean;
   isEditing: boolean;
+  _deleted?: boolean;
 }
 
 export interface EntityState {
@@ -173,7 +172,7 @@ export interface EntityState {
   selectedEntityId?: string;
   editSettingsEntityId?: string;
   showEditEntityModal: boolean;
-  showDeleteEntityModal: boolean;
+  editEntityMode: EditEntityModes;
 }
 
 export const entityDocuments: Omit<DbEntity, "_rev">[] = [
@@ -227,8 +226,8 @@ const initialState: EntityState = {
   selectedEntityIds: [],
   entities: [],
   flatEntities: [],
-  showDeleteEntityModal: false,
   showEditEntityModal: false,
+  editEntityMode: EditEntityModes.Add,
 };
 
 export function entitiesReducer(
@@ -262,12 +261,8 @@ export function entitiesReducer(
     case EntityTypes.SetEditEntityModal:
       return {
         ...state,
-        showEditEntityModal: action.payload,
-      };
-    case EntityTypes.SetDeleteEntityModal:
-      return {
-        ...state,
-        showDeleteEntityModal: action.payload,
+        showEditEntityModal: action.payload.showEditEntityModal,
+        editEntityMode: action.payload.mode ?? EditEntityModes.Add,
       };
 
     default:
