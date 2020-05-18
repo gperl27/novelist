@@ -39,6 +39,8 @@ import {
 import { ClickParam } from "antd/lib/menu";
 import { FormInstance } from "antd/lib/form";
 import { ExclamationCircleOutlined } from "@ant-design/icons/lib";
+import { DbEntity } from "../index";
+import ReactMarkdown from "react-markdown";
 
 export function transformEntitiesToTreedData(
   entities: Entity[]
@@ -46,7 +48,18 @@ export function transformEntitiesToTreedData(
   return entities.map((entity) => {
     return {
       key: entity._id,
-      title: entity.name,
+      icon: undefined,
+      title: (
+        <Collapse>
+          <Collapse.Panel
+            showArrow={false}
+            header={entity.name}
+            key={entity._id}
+          >
+            <div>test</div>
+          </Collapse.Panel>
+        </Collapse>
+      ),
       children: transformEntitiesToTreedData(entity.entities),
     };
   });
@@ -130,6 +143,7 @@ export function Editable(props: EditableProps) {
 
 interface EntityListProps {
   entities: Entity[];
+  depth?: number;
 }
 
 export function EntityListContainer() {
@@ -146,7 +160,19 @@ export function EntityListContainer() {
       <PageHeader
         title="Entities"
         subTitle="Write to an interface"
-        extra={<Button onClick={onClickAddEntity}>Add Entity</Button>}
+        extra={
+          <Dropdown
+            trigger={["click"]}
+            overlay={
+              <Menu>
+                <Menu.Item onClick={onClickAddEntity}>Add Entity</Menu.Item>
+                <Menu.Item>Manage Entities</Menu.Item>
+              </Menu>
+            }
+          >
+            <SettingOutlined />
+          </Dropdown>
+        }
       >
         <Input placeholder={"Filter"} />
       </PageHeader>
@@ -156,7 +182,8 @@ export function EntityListContainer() {
 }
 
 export function EntityList(props: EntityListProps) {
-  const { entities } = props;
+  const { entitiesIndex } = useSelector((state: RootState) => state.entities);
+  const { entities, depth = 0 } = props;
   const dispatch = useDispatch();
 
   function onClickSettings(e: React.MouseEvent) {
@@ -186,91 +213,154 @@ export function EntityList(props: EntityListProps) {
   const onDeleteEntity = (entity: Entity) => (e: ClickParam) => {
     e.domEvent.stopPropagation();
 
+    const parent = entity.entity ? entitiesIndex[entity.entity] : undefined;
+
+    const updatedParent: DbEntity[] = [];
+    if (parent) {
+      const mutableParentEntities = [...parent.entities];
+      mutableParentEntities.splice(
+        parent.entities.findIndex((id) => entity._id === id)
+      );
+
+      updatedParent.push({
+        ...parent,
+        entities: mutableParentEntities,
+      });
+    }
+
+    const cascadedEntities = entity.entities.map((entity) => {
+      return {
+        ...entity,
+        _deleted: true,
+      };
+    });
+
     Modal.confirm({
       title: "Are you sure delete this entity?",
+      content:
+        "All entities attached under this entity will be deleted as well.",
       icon: <ExclamationCircleOutlined />,
       okText: "Delete",
       okType: "danger",
       cancelText: "Cancel",
       onOk() {
         dispatch(
-          updateEntities({
-            ...entity,
-            _deleted: true,
-          })
+          updateEntities([
+            {
+              ...entity,
+              _deleted: true,
+            },
+            ...cascadedEntities,
+            ...updatedParent,
+          ])
         );
       },
     });
   };
 
   return (
+    // <ReactSortable
+    //   list={entities.map((entity) => {
+    //     return {
+    //       ...entity,
+    //       id: entity._id,
+    //     };
+    //   })}
+    //   setList={(newList, sortable, store) => {
+    //     if (store.dragging) {
+    //       console.log('dragging')
+    //     } else {
+    //       console.log('not dragging')
+    //     }
+    //   }}
+    //   onUpdate={console.log}
+    //   onEnd={(evt, x, y) => {
+    //     console.log(evt, "end")
+    //     console.log(x)
+    //     console.log(y)
+    //   }}
+    //   group={{ name: "root", put: true, pull: true }}
+    //   animation={150}
+    //   fallbackOnBody={true}
+    //   invertSwap={true}
+    //   ghostClass={"ghost"}
+    // >
     <div>
-      {entities.map((entity) => {
+      {entities.map((entity, index) => {
         return (
-          <Collapse key={entity._id} expandIconPosition={"right"}>
-            <Collapse.Panel
-              header={entity.name}
-              extra={
-                <Dropdown
-                  trigger={["click"]}
-                  overlay={
-                    <Menu>
-                      <Menu.Item onClick={onAddEntityFromMenu(entity._id)}>
-                        Add entity
-                      </Menu.Item>
-                      <Menu.Item onClick={onEditSettings(entity._id)}>
-                        Edit entity
-                      </Menu.Item>
-                      <Menu.Divider />
-                      <Menu.Item
-                        onClick={onDeleteEntity(entity)}
-                        style={{ color: "red" }}
+          <div data-id={entity._id} key={entity._id}>
+            <Collapse className={"entity-panel"} expandIconPosition={"right"}>
+              <Collapse.Panel
+                header={entity.name}
+                extra={
+                  <Dropdown
+                    trigger={["click"]}
+                    overlay={
+                      <Menu>
+                        <Menu.Item onClick={onAddEntityFromMenu(entity._id)}>
+                          Add entity
+                        </Menu.Item>
+                        <Menu.Item onClick={onEditSettings(entity._id)}>
+                          Edit entity
+                        </Menu.Item>
+                        <Menu.Item>Move</Menu.Item>
+                        <Menu.Item>Clone</Menu.Item>
+                        <Menu.Divider />
+                        <Menu.Item
+                          onClick={onDeleteEntity(entity)}
+                          style={{ color: "red" }}
+                        >
+                          Delete
+                        </Menu.Item>
+                      </Menu>
+                    }
+                  >
+                    <SettingOutlined onClick={onClickSettings} />
+                  </Dropdown>
+                }
+                key={`${entity._id}-panel`}
+              >
+                <div style={{ marginBottom: "1rem" }}>
+                  {entity.description.length === 0 &&
+                  entity.entities.length === 0 ? (
+                    <Empty description={"Nothing here yet!"}>
+                      <Button type={"primary"} onClick={onEdit(entity._id)}>
+                        Start writing
+                      </Button>
+                      <div
+                        style={{
+                          marginTop: "1rem",
+                          marginBottom: "1rem",
+                        }}
                       >
-                        Delete
-                      </Menu.Item>
-                    </Menu>
-                  }
-                >
-                  <SettingOutlined onClick={onClickSettings} />
-                </Dropdown>
-              }
-              key={`${entity._id}-panel`}
-            >
-              <div style={{ marginBottom: "1rem" }}>
-                {entity.description.length === 0 &&
-                entity.entities.length === 0 ? (
-                  <Empty description={"Nothing here yet!"}>
-                    <Button type={"primary"} onClick={onEdit(entity._id)}>
-                      Start writing
-                    </Button>
-                    <div style={{ marginTop: "1rem", marginBottom: "1rem" }}>
-                      or
+                        or
+                      </div>
+                      <Button
+                        type={"primary"}
+                        onClick={() => onAddEntity(entity._id)}
+                      >
+                        Add a new entity
+                      </Button>
+                    </Empty>
+                  ) : (
+                    <div>
+                      <ReactMarkdown source={entity.description} />
+                      <Button
+                        type={"dashed"}
+                        size={"small"}
+                        onClick={onEdit(entity._id)}
+                      >
+                        {entity.description.length > 0
+                          ? "Edit"
+                          : "Add a description"}
+                      </Button>
                     </div>
-                    <Button
-                      type={"primary"}
-                      onClick={() => onAddEntity(entity._id)}
-                    >
-                      Add a new entity
-                    </Button>
-                  </Empty>
-                ) : (
-                  <div>
-                    <p>{entity.description}</p>
-                    <Button
-                      type={"dashed"}
-                      size={"small"}
-                      onClick={onEdit(entity._id)}
-                    >
-                      {entity.description.length > 0
-                        ? "Edit"
-                        : "Add a description"}
-                    </Button>
-                  </div>
-                )}
-              </div>
-              <EntityList entities={entity.entities} />
-            </Collapse.Panel>
-          </Collapse>
+                  )}
+                </div>
+                <EntityList entities={entity.entities} depth={depth + 1} />
+              </Collapse.Panel>
+            </Collapse>
+          </div>
         );
       })}
     </div>
@@ -301,6 +391,7 @@ export const EditEntitySettings = (props: EditEntitySettingsProps) => {
   });
 
   useEffect(() => {
+    form.resetFields();
     form.setFieldsValue({
       name: editEntityMode === EditEntityModes.Edit ? entity?.name : "",
       shouldAutoComplete:
@@ -309,7 +400,7 @@ export const EditEntitySettings = (props: EditEntitySettingsProps) => {
           : true,
       parentId: entity?._id,
     });
-  }, [entity, editEntityMode]);
+  }, [entity, editEntityMode, form]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function onSaveEntity(values: { [name: string]: any }) {
@@ -345,6 +436,7 @@ export const EditEntitySettings = (props: EditEntitySettingsProps) => {
 
   return (
     <Form
+      size={"small"}
       form={form}
       initialValues={{
         name: editEntityMode === EditEntityModes.Edit ? entity?.name : "",

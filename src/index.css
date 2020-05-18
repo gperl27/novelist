@@ -1,9 +1,16 @@
-@import '~antd/dist/antd.css';
+@import "~antd/dist/antd.css";
 
-html, body, #root {
-    height: 100%;
-    margin: 0;
-    padding: 0;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.ghost .entity-panel {
+  opacity: 0.75;
+  background: #c8ebfb !important;
 }

@@ -30,6 +30,8 @@ export function flatToHierarchy(
     });
   }
 
+  // console.log(index, flat, 'hmm')
+
   flat.forEach((node) => {
     if (!node.entity || node.entity === parentId) {
       const nestedEntityMap = node.entities.map((id) => index[id]);

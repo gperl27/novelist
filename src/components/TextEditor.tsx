@@ -47,6 +47,11 @@ export function useAutoComplete(monacoRef: RefObject<typeof monacoEditor>) {
           const contents = entities
             .filter(
               (entity) =>
+                typeof entity.description !== "undefined" &&
+                entity.description.length > 0
+            )
+            .filter(
+              (entity) =>
                 model.getWordAtPosition(position)?.word === entity.name
             )
             .map((entity) => {
@@ -55,9 +60,7 @@ export function useAutoComplete(monacoRef: RefObject<typeof monacoEditor>) {
                   "Cmd + click to go to " +
                   entity.name +
                   "\n\n" +
-                  "## *" +
-                  entity.name +
-                  " docs here*",
+                  entity.description,
               };
             });
 
@@ -93,78 +96,6 @@ export function useAutoComplete(monacoRef: RefObject<typeof monacoEditor>) {
   }, [entities, monacoRef]);
 }
 
-function useCodeLens(
-  editorRef: RefObject<MonacoEditor>,
-  monacoRef: RefObject<typeof monacoEditor>
-) {
-  const dispatch = useDispatch();
-  const { entities } = useSelector((state: RootState) => {
-    const { flatEntities } = state.entities;
-    return {
-      entities: flatEntities,
-    };
-  });
-
-  useEffect(() => {
-    const providerMap = entities.map((entity) => {
-      const commandId = editorRef?.current?.editor?.addCommand(
-        0,
-        function () {
-          // dispatch(selectEntities([entity._id]));
-        },
-        ""
-      );
-
-      const provider = monacoRef?.current?.languages.registerCodeLensProvider(
-        "markdown",
-        {
-          provideCodeLenses: function (model, token) {
-            const matches = model
-              .findMatches(entity.name, true, false, true, null, true)
-              .reduce((acc, current) => {
-                const dupe = acc.find(
-                  (item) =>
-                    item.range.startLineNumber === current.range.startLineNumber
-                );
-
-                if (!dupe) {
-                  return acc.concat([current]);
-                }
-
-                return acc;
-              }, [] as monacoEditor.editor.FindMatch[]);
-
-            const lenses: monacoEditor.languages.CodeLens[] = matches.map(
-              (match) => {
-                return {
-                  range: match.range,
-                  command: {
-                    id: commandId ?? "",
-                    title: `@${entity.name}`,
-                  },
-                };
-              }
-            );
-
-            return {
-              dispose: () => undefined,
-              lenses,
-            };
-          },
-        }
-      );
-
-      return { provider };
-    });
-
-    return () => {
-      providerMap.forEach((provider) => {
-        provider.provider?.dispose();
-      });
-    };
-  }, [dispatch, editorRef, entities, monacoRef]);
-}
-
 export const TextEditor = React.forwardRef(
   (props: TextEditorProps, ref: Ref<MonacoEditor>) => {
     const { value: propsValue, onChange, options, ...editorProps } = props;
@@ -175,8 +106,6 @@ export const TextEditor = React.forwardRef(
     }, [propsValue]);
 
     useAutoUpdateEditorLayout(ref as RefObject<MonacoEditor>);
-    // useAutoComplete(monacoRef);
-    // useCodeLens(ref as RefObject<MonacoEditor>, monacoRef);
 
     return (
       <MonacoEditor
@@ -206,6 +135,9 @@ export const TextEditor = React.forwardRef(
             multipleImplementations: "goto",
             multipleReferences: "goto",
             multipleTypeDefinitions: "goto",
+          },
+          scrollbar: {
+            alwaysConsumeMouseWheel: false,
           },
           ...options,
         }}

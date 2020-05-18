@@ -1,5 +1,5 @@
 import "./App.css";
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import MonacoEditor from "react-monaco-editor";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "./modules";
@@ -9,6 +9,7 @@ import {
   selectEditSettingsEntity,
   selectEntity,
   setEditEntityModal,
+  updateEntities,
 } from "./modules/entities";
 import {
   Editable,
@@ -22,13 +23,15 @@ import {
   selectContent,
   updateContent,
 } from "./modules/content";
-import { Button, Form, Menu, Modal, PageHeader } from "antd";
+import { Button, Divider, Dropdown, Form, Menu, Modal, PageHeader } from "antd";
 import { db } from "./index";
 import { useDebouncedCallback } from "use-debounce";
 import { updateStores } from "./modules/app";
 import { TextEditor, useAutoComplete } from "./components/TextEditor";
 import { ReflexContainer, ReflexElement, ReflexSplitter } from "react-reflex";
 import * as monaco from "monaco-editor";
+import ReactMarkdown from "react-markdown";
+import { ReadOutlined, EditOutlined, SettingOutlined } from "@ant-design/icons";
 
 interface DirectoryProps {
   onClickNew?: () => void;
@@ -103,6 +106,7 @@ function App() {
   const dispatch = useDispatch();
   const contentEditorRef = useRef<MonacoEditor>(null);
   const entityEditorRef = useRef<MonacoEditor>(null);
+  const [isShowingContentPreview, setIsShowingContentPreview] = useState(false);
   const { selectedContent, selectedEntity } = useSelector(
     (state: RootState) => {
       const { selectedContentId } = state.content;
@@ -142,6 +146,20 @@ function App() {
     }
   }, 1000);
 
+  const [debouncedUpdateEntity, cancelUpdateEntity] = useDebouncedCallback(
+    (value: string) => {
+      if (selectedEntity) {
+        dispatch(
+          updateEntities({
+            ...selectedEntity,
+            description: value,
+          })
+        );
+      }
+    },
+    1000
+  );
+
   useEffect(() => {
     db.bulkDocs([...entityDocuments, ...contentFixture])
       .catch((e) => e)
@@ -164,6 +182,26 @@ function App() {
         })
       );
     }
+  }
+
+  function cancelAndUpdateEntityFromEditorRef() {
+    cancelUpdateEntity();
+
+    const text = entityEditorRef?.current?.editor?.getValue();
+
+    if (selectedEntity && text) {
+      dispatch(
+        updateEntities({
+          ...selectedEntity,
+          description: text,
+        })
+      );
+    }
+  }
+
+  function onClickBackInEntityEditor() {
+    cancelAndUpdateEntityFromEditorRef();
+    dispatch(selectEntity());
   }
 
   function onClickSelectContent() {
@@ -192,14 +230,61 @@ function App() {
           }}
         />
         <ReflexElement flex={2}>
-          <div style={{ height: "100%", width: "100%" }}>
-            <TextEditor
-              ref={contentEditorRef}
-              onChange={(text) => {
-                debouncedCallback(text);
-              }}
-              value={selectedContent?.text}
+          <div style={{ height: "100%", width: "100%", overflowY: 'hidden' }}>
+            <PageHeader
+              title={selectedContent?.name ?? "Untitled"}
+              extra={[
+                <Button
+                  style={{
+                    background: isShowingContentPreview
+                      ? "transparent"
+                      : "yellow",
+                  }}
+                  shape={"circle"}
+                  size={"small"}
+                  icon={<EditOutlined />}
+                  onClick={() => setIsShowingContentPreview(false)}
+                />,
+                <Button
+                  style={{
+                    background: isShowingContentPreview
+                      ? "yellow"
+                      : "transparent",
+                  }}
+                  shape={"circle"}
+                  size={"small"}
+                  icon={<ReadOutlined />}
+                  onClick={() => setIsShowingContentPreview(true)}
+                />,
+                <Divider type={"vertical"} />,
+                <Dropdown
+                  trigger={["click"]}
+                  overlay={
+                    <Menu>
+                      <Menu.Item>Edit Title</Menu.Item>
+                      <Menu.Item>History</Menu.Item>
+                      <Menu.Divider />
+                      <Menu.Item>Delete</Menu.Item>
+                    </Menu>
+                  }
+                >
+                  <SettingOutlined style={{ marginLeft: "-2px" }} />
+                </Dropdown>,
+              ]}
             />
+            {isShowingContentPreview ? (
+              <div style={{ paddingLeft: "1.5rem", paddingRight: "1.5rem" }}>
+                <ReactMarkdown source={selectedContent?.text} />
+              </div>
+            ) : (
+              <TextEditor
+                ref={contentEditorRef}
+                onChange={(text) => {
+                  debouncedCallback(text);
+                }}
+                value={selectedContent?.text}
+              />
+            )}
           </div>
         </ReflexElement>
         <ReflexSplitter
@@ -212,13 +297,14 @@ function App() {
         <ReflexElement flex={1.5}>
           <div style={{ height: "100%", width: "100%" }}>
             {selectedEntity ? (
-              <div style={{ height: "100%", width: "100%" }}>
+              <div style={{ height: "100%", width: "100%", overflowY: 'hidden' }}>
                 <PageHeader
-                  onBack={() => dispatch(selectEntity())}
+                  onBack={onClickBackInEntityEditor}
                   title={selectedEntity?.name}
                   extra={[
                     <Button
                       onClick={() => {
+                        // TODO: Possibly combine these into one piece of state?
                         dispatch(selectEditSettingsEntity(selectedEntity?._id));
                         dispatch(
                           setEditEntityModal(true, EditEntityModes.Edit)
@@ -232,7 +318,7 @@ function App() {
                 <TextEditor
                   ref={entityEditorRef}
                   onChange={(text) => {
-                    console.log(text, "text");
+                    debouncedUpdateEntity(text);
                   }}
                   value={selectedEntity?.description}
                 />

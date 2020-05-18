@@ -74,18 +74,9 @@ export function EntityDirectory() {
     <div>
       <Tree
         draggable={true}
-        showLine={true}
-        showIcon={true}
         treeData={transformEntitiesToTreedData(entities)?.concat(
           isAdding ? addEntity : []
         )}
-        multiple={true}
-        selectable={true}
-        selectedKeys={selectedEntityIds}
-        // onDrop={onDrop}
-        onSelect={(keys) => {
-          // dispatch(selectEntities(keys as string[]));
-        }}
       />
       <Button
         style={{ marginLeft: "0.25rem" }}

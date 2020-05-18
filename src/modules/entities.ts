@@ -98,15 +98,19 @@ function areEntities(entities: any[]): entities is Entity[] {
 export const updateEntities = (
   entities: Omit<Entity | DbEntity, "_rev"> | Omit<Entity | DbEntity, "_rev">[]
 ): AppThunk => async (dispatch) => {
-  let updatedEntities = Array.isArray(entities) ? entities : [entities];
-  if (areEntities(updatedEntities)) {
-    updatedEntities = updatedEntities.map((entity) => {
+  const coercedToArrayEntities = Array.isArray(entities)
+    ? entities
+    : [entities];
+  const updatedEntities = coercedToArrayEntities.map((entity) => {
+    if (isEntity(entity)) {
       return {
         ...entity,
         entities: entity.entities.map((entity) => entity._id),
       };
-    });
-  }
+    }
+
+    return entity;
+  });
 
   await db.bulkDocs(updatedEntities);
   await dispatch(updateStores());
@@ -199,7 +203,6 @@ export const entityDocuments: Omit<DbEntity, "_rev">[] = [
   },
   {
     _id: "3",
-
     description: "",
     type: "entity",
     name: "Plot",
