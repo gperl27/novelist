@@ -12,6 +12,7 @@ export interface Content extends PersistenceSchema {
 interface ContentState {
   selectedContentId?: string;
   content: Content[];
+  showContentRevisions?: boolean;
 }
 
 export enum ContentTypes {
@@ -20,6 +21,7 @@ export enum ContentTypes {
   SelectContent = "SELECT_CONTENT",
   UpdateContent = "UPDATE_CONTENT",
   FindAndReplace = "FIND_AND_REPLACE",
+  SetShowContentRevisions = "SET_SHOW_CONTENT_REVISIONS",
 }
 
 interface SetContentStore {
@@ -47,12 +49,18 @@ interface FindAndReplace {
   payload: [string, string];
 }
 
+interface SetShowContentRevisions {
+  type: ContentTypes.SetShowContentRevisions;
+  payload: boolean;
+}
+
 type ContentActionTypes =
   | SetContent
   | SelectContent
   | UpdateContent
   | FindAndReplace
-  | SetContentStore;
+  | SetContentStore
+  | SetShowContentRevisions;
 
 export const addNewContent = (title?: string): AppThunk => async (dispatch) => {
   const _id = uuidv4();
@@ -72,6 +80,13 @@ export function setContentStore(store: ContentState): ContentActionTypes {
   return {
     type: ContentTypes.SetContentStore,
     payload: store,
+  };
+}
+
+export function setShowContentRevisions(payload: boolean): ContentActionTypes {
+  return {
+    type: ContentTypes.SetShowContentRevisions,
+    payload,
   };
 }
 
@@ -130,6 +145,7 @@ export const contentFixture = [
 
 const initialState: ContentState = {
   content: [],
+  showContentRevisions: false,
 };
 
 export function contentReducer(
@@ -169,6 +185,12 @@ export function contentReducer(
         ...state,
         content: action.payload.content,
       };
+    case ContentTypes.SetShowContentRevisions: {
+      return {
+        ...state,
+        showContentRevisions: action.payload,
+      };
+    }
     default:
       return state;
   }

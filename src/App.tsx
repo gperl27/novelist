@@ -1,7 +1,7 @@
 import "./App.css";
 import React, { useEffect, useRef, useState } from "react";
-import MonacoEditor from "react-monaco-editor";
-import { useDispatch, useSelector } from "react-redux";
+import MonacoEditor, { MonacoDiffEditor } from "react-monaco-editor";
+import { batch, useDispatch, useSelector } from "react-redux";
 import { RootState } from "./modules";
 import {
   EditEntityModes,
@@ -21,9 +21,21 @@ import {
   Content,
   contentFixture,
   selectContent,
+  setShowContentRevisions,
   updateContent,
 } from "./modules/content";
-import { Button, Divider, Dropdown, Form, Menu, Modal, PageHeader } from "antd";
+import {
+  Button,
+  Divider,
+  Dropdown,
+  Form,
+  Menu,
+  Modal,
+  PageHeader,
+  Tag,
+  Timeline,
+  Tooltip,
+} from "antd";
 import { db } from "./index";
 import { useDebouncedCallback } from "use-debounce";
 import { updateStores } from "./modules/app";
@@ -31,7 +43,15 @@ import { TextEditor, useAutoComplete } from "./components/TextEditor";
 import { ReflexContainer, ReflexElement, ReflexSplitter } from "react-reflex";
 import * as monaco from "monaco-editor";
 import ReactMarkdown from "react-markdown";
-import { ReadOutlined, EditOutlined, SettingOutlined } from "@ant-design/icons";
+import {
+  ReadOutlined,
+  EditOutlined,
+  SettingOutlined,
+  EyeOutlined,
+} from "@ant-design/icons";
+// eslint-disable-next-line @typescript-eslint/ban-ts-ignore
+// @ts-ignore
+import { initVimMode } from "monaco-vim";
 
 interface DirectoryProps {
   onClickNew?: () => void;
@@ -103,13 +123,18 @@ function App() {
   const monacoRef = useRef(monaco);
   // TODO: DONT USE REF, USE INSTANCE DIRECTLY
   useAutoComplete(monacoRef);
+
   const dispatch = useDispatch();
   const contentEditorRef = useRef<MonacoEditor>(null);
   const entityEditorRef = useRef<MonacoEditor>(null);
   const [isShowingContentPreview, setIsShowingContentPreview] = useState(false);
-  const { selectedContent, selectedEntity } = useSelector(
+  const [revisions, setRevisions] = useState<
+    (Content & PouchDB.Core.GetMeta)[]
+  >([]);
+  const [revisionComparer, setRevisionComparer] = useState(revisions[1]);
+  const { selectedContent, selectedEntity, showContentRevisions } = useSelector(
     (state: RootState) => {
-      const { selectedContentId } = state.content;
+      const { selectedContentId, showContentRevisions } = state.content;
       const selectedContent = state.content.content.find(
         (c) => c._id === selectedContentId
       );
@@ -132,6 +157,7 @@ function App() {
         selectedEntity,
         showEditEntityModal,
         editSettingsEntity,
+        showContentRevisions,
       };
     }
   );
@@ -160,6 +186,33 @@ function App() {
     1000
   );
 
+  // const { current: contentCurrent } = contentEditorRef;
+  // const { current: entityCurrent } = entityEditorRef;
+  //
+  // useEffect(() => {
+  //   const statusNode = document.getElementById("status");
+  //
+  //   let contentVimMode: any;
+  //   if (contentCurrent?.editor) {
+  //     contentVimMode = initVimMode(contentCurrent.editor, statusNode);
+  //   }
+  //
+  //   return () => {
+  //     contentVimMode?.dispose();
+  //   };
+  // }, [contentCurrent]);
+  //
+  const [ref, setRef] = useState<MonacoEditor | null>();
+  //
+  // useEffect(() => {
+  //   const statusNode2 = document.getElementById("status2");
+  //
+  //   let entityVimMode: any;
+  //   if (ref?.editor) {
+  //     initVimMode(ref.editor, statusNode2);
+  //   }
+  // }, [ref]);
+
   useEffect(() => {
     db.bulkDocs([...entityDocuments, ...contentFixture])
       .catch((e) => e)
@@ -168,6 +221,50 @@ function App() {
         dispatch(selectContent("100"));
       });
   }, [dispatch]);
+
+  useEffect(() => {
+    if (selectedContent) {
+      db.get(selectedContent._id, {
+        // revs: true,
+        revs_info: true,
+      }).then((doc) => {
+        if (doc._revs_info) {
+          const docs = doc._revs_info.map((revInfo) => {
+            return {
+              id: selectedContent._id,
+              rev: revInfo.rev,
+            };
+          });
+          db.bulkGet({ docs }).then((docs) => {
+            console.log(docs, "docs");
+            function isOk(
+              doc: any
+            ): doc is { ok: Content & PouchDB.Core.GetMeta } {
+              return doc.hasOwnProperty("ok");
+            }
+
+            const transformedDocs = docs.results
+              .map((doc) => doc.docs[0])
+              .filter(isOk)
+              .map((doc) => doc.ok);
+
+            const filteredDocs = transformedDocs.filter((doc, index) => {
+              index = index + 1;
+
+              if (!transformedDocs[index]) {
+                return true;
+              }
+
+              return doc.text !== transformedDocs[index].text;
+            });
+
+            setRevisions(filteredDocs);
+            setRevisionComparer(filteredDocs[1]);
+          });
+        }
+      });
+    }
+  }, [selectedContent]);
 
   function cancelAndUpdateContent() {
     cancel();
@@ -213,8 +310,54 @@ function App() {
     contentEditorRef?.current?.editor?.focus();
   }
 
+  const config = {
+    title: "Edit History",
+    closable: true,
+    footer: null,
+    content: (
+      <div>
+        <Divider />
+        <div style={{ maxHeight: "50vh", overflowY: "scroll" }}>
+          <Timeline>
+            {revisions.map((revision) => {
+              return (
+                <Timeline.Item key={revision._rev}>
+                  + 20 additions - 12/8/10
+                  <Tooltip title={"Compare to this revision"}>
+                    <Button
+                      onClick={() => {
+                        setRevisionComparer(revision);
+                        Modal.destroyAll();
+                      }}
+                      style={{ marginLeft: "0.2rem" }}
+                      type={"link"}
+                      icon={<EyeOutlined />}
+                    />
+                  </Tooltip>
+                </Timeline.Item>
+              );
+            })}
+          </Timeline>
+        </div>
+      </div>
+    ),
+  };
+
+  function onClickRevertContent() {
+    if (selectedContent) {
+      dispatch(
+        updateContent({
+          ...selectedContent,
+          text: revisionComparer.text,
+        })
+      );
+    }
+  }
+
   return (
     <div style={{ height: "100%" }}>
+      <div id="status" />
+      <div id="status2" />
       <ReflexContainer orientation="vertical">
         <ReflexElement flex={0.5}>
           <Directory
@@ -230,49 +373,92 @@ function App() {
           }}
         />
         <ReflexElement flex={2}>
-          <div style={{ height: "100%", width: "100%", overflowY: 'hidden' }}>
-            <PageHeader
-              title={selectedContent?.name ?? "Untitled"}
-              extra={[
-                <Button
-                  style={{
-                    background: isShowingContentPreview
-                      ? "transparent"
-                      : "yellow",
-                  }}
-                  shape={"circle"}
-                  size={"small"}
-                  icon={<EditOutlined />}
-                  onClick={() => setIsShowingContentPreview(false)}
-                />,
-                <Button
-                  style={{
-                    background: isShowingContentPreview
-                      ? "yellow"
-                      : "transparent",
-                  }}
-                  shape={"circle"}
-                  size={"small"}
-                  icon={<ReadOutlined />}
-                  onClick={() => setIsShowingContentPreview(true)}
-                />,
-                <Divider type={"vertical"} />,
-                <Dropdown
-                  trigger={["click"]}
-                  overlay={
-                    <Menu>
-                      <Menu.Item>Edit Title</Menu.Item>
-                      <Menu.Item>History</Menu.Item>
-                      <Menu.Divider />
-                      <Menu.Item>Delete</Menu.Item>
-                    </Menu>
-                  }
-                >
-                  <SettingOutlined style={{ marginLeft: "-2px" }} />
-                </Dropdown>,
-              ]}
-            />
-            {isShowingContentPreview ? (
+          <div style={{ height: "100%", width: "100%", overflowY: "hidden" }}>
+            {!showContentRevisions ? (
+              <PageHeader
+                title={selectedContent?.name ?? "Untitled"}
+                extra={[
+                  <Button
+                    style={{
+                      background: isShowingContentPreview
+                        ? "transparent"
+                        : "yellow",
+                    }}
+                    shape={"circle"}
+                    size={"small"}
+                    icon={<EditOutlined />}
+                    onClick={() => setIsShowingContentPreview(false)}
+                  />,
+                  <Button
+                    style={{
+                      background: isShowingContentPreview
+                        ? "yellow"
+                        : "transparent",
+                    }}
+                    shape={"circle"}
+                    size={"small"}
+                    icon={<ReadOutlined />}
+                    onClick={() => setIsShowingContentPreview(true)}
+                  />,
+                  <Divider type={"vertical"} />,
+                  <Dropdown
+                    trigger={["click"]}
+                    overlay={
+                      <Menu>
+                        <Menu.Item>Rename</Menu.Item>
+                        <Menu.Item
+                          onClick={() => {
+                            if (selectedContent) {
+                              dispatch(setShowContentRevisions(true));
+                            }
+                          }}
+                        >
+                          History
+                        </Menu.Item>
+                        <Menu.Divider />
+                        <Menu.Item>Delete</Menu.Item>
+                      </Menu>
+                    }
+                  >
+                    <SettingOutlined style={{ marginLeft: "-2px" }} />
+                  </Dropdown>,
+                ]}
+              />
+            ) : (
+              <PageHeader
+                onBack={() => dispatch(setShowContentRevisions(false))}
+                title={"History"}
+                subTitle={"10/13/19 last edited"}
+                tags={
+                  <Tag
+                    onClick={() =>
+                      Modal.confirm({
+                        title: "Revert Content",
+                        content:
+                          "Are you sure you want to revert to this content?",
+                        onOk: onClickRevertContent,
+                      })
+                    }
+                  >
+                    Revert
+                  </Tag>
+                }
+                extra={[
+                  <Button onClick={() => Modal.confirm(config)}>
+                    Full History
+                  </Button>,
+                ]}
+              />
+            )}
+            {showContentRevisions && revisions[0] && revisionComparer ? (
+              <MonacoDiffEditor
+                height={"100%"}
+                width={"100%"}
+                language="markdown"
+                original={revisions[0].text}
+                value={revisionComparer.text}
+              />
+            ) : isShowingContentPreview ? (
               <div style={{ paddingLeft: "1.5rem", paddingRight: "1.5rem" }}>
                 <ReactMarkdown source={selectedContent?.text} />
               </div>
@@ -297,18 +483,23 @@ function App() {
         <ReflexElement flex={1.5}>
           <div style={{ height: "100%", width: "100%" }}>
             {selectedEntity ? (
-              <div style={{ height: "100%", width: "100%", overflowY: 'hidden' }}>
+              <div
+                style={{ height: "100%", width: "100%", overflowY: "hidden" }}
+              >
                 <PageHeader
                   onBack={onClickBackInEntityEditor}
                   title={selectedEntity?.name}
                   extra={[
                     <Button
                       onClick={() => {
-                        // TODO: Possibly combine these into one piece of state?
-                        dispatch(selectEditSettingsEntity(selectedEntity?._id));
-                        dispatch(
-                          setEditEntityModal(true, EditEntityModes.Edit)
-                        );
+                        batch(() => {
+                          dispatch(
+                            selectEditSettingsEntity(selectedEntity?._id)
+                          );
+                          dispatch(
+                            setEditEntityModal(true, EditEntityModes.Edit)
+                          );
+                        });
                       }}
                     >
                       Settings
@@ -316,7 +507,10 @@ function App() {
                   ]}
                 />
                 <TextEditor
-                  ref={entityEditorRef}
+                  // ref={entityEditorRef}
+                  ref={(ref) => {
+                    setRef(ref);
+                  }}
                   onChange={(text) => {
                     debouncedUpdateEntity(text);
                   }}

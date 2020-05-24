@@ -17,6 +17,7 @@
     "babel-plugin-import": "^1.13.0",
     "debounce": "^1.2.0",
     "debounce-promise": "^3.1.2",
+    "monaco-vim": "^0.1.7",
     "pouchdb": "^7.2.1",
     "pouchdb-find": "^7.2.1",
     "react": "^16.13.1",
