@@ -50,7 +50,7 @@ interface SetEditEntityModal {
   };
 }
 
-type EntityActionTypes =
+export type EntityActionTypes =
   | SelectEntities
   | UpdateEntity
   | SetEntityStore

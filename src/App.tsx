@@ -2,7 +2,7 @@ import "./App.css";
 import React, { useEffect, useRef, useState } from "react";
 import MonacoEditor, { MonacoDiffEditor } from "react-monaco-editor";
 import { batch, useDispatch, useSelector } from "react-redux";
-import { RootState } from "./modules";
+import { RootState, setStore } from "./modules";
 import {
   EditEntityModes,
   entityDocuments,
@@ -32,6 +32,7 @@ import {
   Menu,
   Modal,
   PageHeader,
+  Space,
   Tag,
   Timeline,
   Tooltip,
@@ -52,6 +53,7 @@ import {
 // eslint-disable-next-line @typescript-eslint/ban-ts-ignore
 // @ts-ignore
 import { initVimMode } from "monaco-vim";
+import { isElementOfType } from "react-dom/test-utils";
 
 interface DirectoryProps {
   onClickNew?: () => void;
@@ -186,6 +188,23 @@ function App() {
     1000
   );
 
+  const [savedStore, setSavedStore] = useState<RootState & { _rev: string }>();
+  const store = useSelector((state) => state);
+
+  useEffect(() => {
+    function onBeforeUnload() {
+      db.put({
+        _id: "state",
+        _rev: savedStore?._rev,
+        ...store,
+      });
+    }
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [savedStore, store]);
+
   // const { current: contentCurrent } = contentEditorRef;
   // const { current: entityCurrent } = entityEditorRef;
   //
@@ -214,18 +233,26 @@ function App() {
   // }, [ref]);
 
   useEffect(() => {
-    db.bulkDocs([...entityDocuments, ...contentFixture])
-      .catch((e) => e)
-      .finally(async () => {
-        dispatch(updateStores());
-        dispatch(selectContent("100"));
+    db.get<RootState>("state")
+      .then((doc) => {
+        const { _id, _rev, ...store } = doc;
+        setSavedStore(doc);
+        dispatch(setStore(store));
+      })
+      .catch((e) => {
+        db.bulkDocs([...entityDocuments, ...contentFixture])
+          .catch((e) => e)
+          .finally(async () => {
+            dispatch(updateStores());
+            dispatch(selectContent("100"));
+          });
       });
   }, [dispatch]);
 
   useEffect(() => {
     if (selectedContent) {
       db.get(selectedContent._id, {
-        // revs: true,
+        // eslint-disable-next-line @typescript-eslint/camelcase
         revs_info: true,
       }).then((doc) => {
         if (doc._revs_info) {
@@ -236,7 +263,6 @@ function App() {
             };
           });
           db.bulkGet({ docs }).then((docs) => {
-            console.log(docs, "docs");
             function isOk(
               doc: any
             ): doc is { ok: Content & PouchDB.Core.GetMeta } {
@@ -257,9 +283,10 @@ function App() {
 
               return doc.text !== transformedDocs[index].text;
             });
+            const docsWithoutHead = filteredDocs.slice(1);
 
-            setRevisions(filteredDocs);
-            setRevisionComparer(filteredDocs[1]);
+            setRevisions(docsWithoutHead);
+            setRevisionComparer(docsWithoutHead[0]);
           });
         }
       });
@@ -307,11 +334,12 @@ function App() {
 
   function onClickNew() {
     cancelAndUpdateContent();
+    dispatch(setShowContentRevisions(false));
     contentEditorRef?.current?.editor?.focus();
   }
 
   const config = {
-    title: "Edit History",
+    title: "All History",
     closable: true,
     footer: null,
     content: (
@@ -320,18 +348,38 @@ function App() {
         <div style={{ maxHeight: "50vh", overflowY: "scroll" }}>
           <Timeline>
             {revisions.map((revision) => {
+              const nextRevisionLength = selectedContent?.text.length ?? 0;
+              const lengthDiff =
+                (nextRevisionLength - revision.text.length) * -1;
+
+              const diffProps = {
+                title: "No difference",
+                sign: "",
+                color: "gray",
+              };
+
+              if (lengthDiff > 0) {
+                diffProps.title = "Additions";
+                diffProps.sign = "+";
+                diffProps.color = "green";
+              } else if (lengthDiff < 0) {
+                diffProps.title = "Deletions";
+                diffProps.sign = "-";
+                diffProps.color = "red";
+              }
+
               return (
-                <Timeline.Item key={revision._rev}>
-                  + 20 additions - 12/8/10
+                <Timeline.Item color={diffProps.color} key={revision._rev}>
+                  {`${diffProps.sign} ${Math.abs(lengthDiff)} ${
+                    diffProps.title
+                  }`}
                   <Tooltip title={"Compare to this revision"}>
-                    <Button
+                    <EyeOutlined
                       onClick={() => {
                         setRevisionComparer(revision);
                         Modal.destroyAll();
                       }}
-                      style={{ marginLeft: "0.2rem" }}
-                      type={"link"}
-                      icon={<EyeOutlined />}
+                      style={{ marginLeft: "0.5rem" }}
                     />
                   </Tooltip>
                 </Timeline.Item>
@@ -354,6 +402,8 @@ function App() {
     }
   }
 
+  const diffRef = useRef<MonacoDiffEditor>(null);
+
   return (
     <div style={{ height: "100%" }}>
       <div id="status" />
@@ -370,6 +420,7 @@ function App() {
           onResize={() => {
             contentEditorRef?.current?.editor?.layout();
             entityEditorRef?.current?.editor?.layout();
+            diffRef?.current?.editor?.layout();
           }}
         />
         <ReflexElement flex={2}>
@@ -450,12 +501,13 @@ function App() {
                 ]}
               />
             )}
-            {showContentRevisions && revisions[0] && revisionComparer ? (
+            {showContentRevisions && selectedContent && revisionComparer ? (
               <MonacoDiffEditor
+                ref={diffRef}
                 height={"100%"}
                 width={"100%"}
                 language="markdown"
-                original={revisions[0].text}
+                original={selectedContent.text}
                 value={revisionComparer.text}
               />
             ) : isShowingContentPreview ? (
@@ -478,6 +530,7 @@ function App() {
           onResize={() => {
             contentEditorRef?.current?.editor?.layout();
             entityEditorRef?.current?.editor?.layout();
+            diffRef?.current?.editor?.layout();
           }}
         />
         <ReflexElement flex={1.5}>

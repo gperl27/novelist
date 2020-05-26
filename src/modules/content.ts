@@ -54,7 +54,7 @@ interface SetShowContentRevisions {
   payload: boolean;
 }
 
-type ContentActionTypes =
+export type ContentActionTypes =
   | SetContent
   | SelectContent
   | UpdateContent
