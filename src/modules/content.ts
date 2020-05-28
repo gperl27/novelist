@@ -13,6 +13,7 @@ interface ContentState {
   selectedContentId?: string;
   content: Content[];
   showContentRevisions?: boolean;
+  showRenameContentModal: boolean;
 }
 
 export enum ContentTypes {
@@ -22,6 +23,7 @@ export enum ContentTypes {
   UpdateContent = "UPDATE_CONTENT",
   FindAndReplace = "FIND_AND_REPLACE",
   SetShowContentRevisions = "SET_SHOW_CONTENT_REVISIONS",
+  SetShowRenameContentModal = "SET_SHOW_RENAME_CONTENT_MODAL",
 }
 
 interface SetContentStore {
@@ -54,13 +56,19 @@ interface SetShowContentRevisions {
   payload: boolean;
 }
 
+interface SetShowRenameContentModalAction {
+  type: ContentTypes.SetShowRenameContentModal;
+  payload: boolean;
+}
+
 export type ContentActionTypes =
   | SetContent
   | SelectContent
   | UpdateContent
   | FindAndReplace
   | SetContentStore
-  | SetShowContentRevisions;
+  | SetShowContentRevisions
+  | SetShowRenameContentModalAction;
 
 export const addNewContent = (title?: string): AppThunk => async (dispatch) => {
   const _id = uuidv4();
@@ -105,10 +113,21 @@ export function selectContent(contentId: string): ContentActionTypes {
 }
 
 export const updateContent = (content: Content): AppThunk => async (
-  dispatch
+  dispatch,
+  getState
 ) => {
+  const isDeleting = content._deleted;
   await db.put(content);
   await dispatch(updateStores());
+
+  if (isDeleting) {
+    const currentContent = getState().content.content;
+    if (currentContent.length > 0) {
+      dispatch(selectContent(currentContent[0]._id));
+    } else {
+      dispatch(addNewContent());
+    }
+  }
 };
 
 export const findAndReplace = (
@@ -128,6 +147,15 @@ export const findAndReplace = (
   await dispatch(updateStores());
 };
 
+export function setShowRenameContentModal(
+  isShowing: boolean
+): ContentActionTypes {
+  return {
+    type: ContentTypes.SetShowRenameContentModal,
+    payload: isShowing,
+  };
+}
+
 export const contentFixture = [
   {
     _id: "100",
@@ -146,6 +174,7 @@ export const contentFixture = [
 const initialState: ContentState = {
   content: [],
   showContentRevisions: false,
+  showRenameContentModal: false,
 };
 
 export function contentReducer(
@@ -191,6 +220,11 @@ export function contentReducer(
         showContentRevisions: action.payload,
       };
     }
+    case ContentTypes.SetShowRenameContentModal:
+      return {
+        ...state,
+        showRenameContentModal: action.payload,
+      };
     default:
       return state;
   }

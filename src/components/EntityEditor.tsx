@@ -30,6 +30,7 @@ import {
   Tag,
   Tree,
   Switch,
+  Select,
 } from "antd";
 import {
   CheckOutlined,
@@ -41,6 +42,7 @@ import { FormInstance } from "antd/lib/form";
 import { ExclamationCircleOutlined } from "@ant-design/icons/lib";
 import { DbEntity } from "../index";
 import ReactMarkdown from "react-markdown";
+import { useDebouncedCallback } from "use-debounce";
 
 export function transformEntitiesToTreedData(
   entities: Entity[]
@@ -65,6 +67,44 @@ export function transformEntitiesToTreedData(
   });
 }
 
+function getAllParents(
+  entity: Entity | DbEntity,
+  index: { [key: string]: DbEntity },
+  parents: DbEntity[] = []
+): DbEntity[] {
+  if (!entity.entity) {
+    return parents;
+  }
+
+  const parent = index[entity.entity];
+  parents.push(parent);
+
+  return getAllParents(parent, index, parents);
+}
+
+type EntityWithChildren<T> = {
+  entities: EntityWithChildren<T>[];
+};
+
+function getAllChildren(
+  entity: DbEntity,
+  index: { [key: string]: DbEntity },
+  children: DbEntity[] = []
+) {
+  if (entity.entities.length === 0) {
+    return children;
+  }
+
+  entity.entities.forEach((entity) => {
+    const entityFromIndex = index[entity];
+    children.push(entityFromIndex);
+
+    getAllChildren(entityFromIndex, index, children);
+  });
+
+  return children;
+}
+
 export function entitiesToOrderedFlatMap(
   entities: Entity[],
   flatMap: Entity[] = []
@@ -85,9 +125,16 @@ interface EditableProps {
 }
 
 export function Editable(props: EditableProps) {
+  const { value: propValue } = props;
   const [showEdit, setShowEdit] = useState(false);
   const [isEditing, setIsEditing] = useState(props.isEditing ?? false);
-  const [value, setValue] = useState(props.value ?? "");
+  const [value, setValue] = useState(propValue ?? "");
+
+  useEffect(() => {
+    if (propValue) {
+      setValue(propValue);
+    }
+  }, [propValue]);
 
   function onSave(e: React.MouseEvent) {
     e.stopPropagation();
@@ -148,7 +195,23 @@ interface EntityListProps {
 
 export function EntityListContainer() {
   const dispatch = useDispatch();
-  const { entities } = useSelector((state: RootState) => state.entities);
+  const {
+    entities,
+    flatEntities,
+    entitiesIndex,
+    selectedEntities,
+  } = useSelector((state: RootState) => {
+    const { entities, flatEntities, entitiesIndex } = state.entities;
+    const selectedEntities = flatEntities
+      .filter((entity) => entity.isVisible)
+      .map((entity) => entity.name);
+    return {
+      entities,
+      flatEntities,
+      entitiesIndex,
+      selectedEntities,
+    };
+  });
 
   function onClickAddEntity() {
     dispatch(selectEditSettingsEntity());
@@ -174,7 +237,54 @@ export function EntityListContainer() {
           </Dropdown>
         }
       >
-        <Input placeholder={"Filter"} />
+        <Select
+          mode={"multiple"}
+          style={{ width: "100%" }}
+          placeholder={"Filter"}
+          value={selectedEntities}
+          onSelect={(_, data) => {
+            if (data.key) {
+              const entity = entitiesIndex[data.key];
+              const parents = getAllParents(entity, entitiesIndex);
+              const transformedParents = parents.map((parent) => {
+                return {
+                  ...parent,
+                  isVisible: true,
+                };
+              });
+
+              dispatch(
+                updateEntities([
+                  {
+                    ...entity,
+                    isVisible: true,
+                  },
+                  ...transformedParents,
+                ])
+              );
+            }
+          }}
+          onDeselect={(_, data) => {
+            if (data.key) {
+              const entity = entitiesIndex[data.key];
+
+              dispatch(
+                updateEntities({
+                  ...entity,
+                  isVisible: false,
+                })
+              );
+            }
+          }}
+        >
+          {flatEntities.map((entity) => {
+            return (
+              <Select.Option value={entity.name} key={entity._id}>
+                {entity.name}
+              </Select.Option>
+            );
+          })}
+        </Select>
       </PageHeader>
       <EntityList entities={entities} />
     </div>
@@ -182,9 +292,32 @@ export function EntityListContainer() {
 }
 
 export function EntityList(props: EntityListProps) {
-  const { entitiesIndex } = useSelector((state: RootState) => state.entities);
+  const { entitiesIndex, areEntitiesSelected } = useSelector(
+    (state: RootState) => {
+      const { entitiesIndex, flatEntities } = state.entities;
+      const areEntitiesSelected = flatEntities.some(
+        (entity) => entity.isVisible
+      );
+
+      return {
+        entitiesIndex,
+        areEntitiesSelected,
+      };
+    }
+  );
   const { entities, depth = 0 } = props;
   const dispatch = useDispatch();
+  const [debouncedCallback] = useDebouncedCallback(
+    (entity: Entity, isOpen: boolean) => {
+      dispatch(
+        updateEntities({
+          ...entity,
+          isOpen,
+        })
+      );
+    },
+    1000
+  );
 
   function onClickSettings(e: React.MouseEvent) {
     e.stopPropagation();
@@ -286,11 +419,32 @@ export function EntityList(props: EntityListProps) {
     //   ghostClass={"ghost"}
     // >
     <div>
-      {entities.map((entity, index) => {
+      {entities.map((entity) => {
+        if (areEntitiesSelected && !entity.isVisible) {
+          return null;
+        }
+
         return (
           <div data-id={entity._id} key={entity._id}>
-            <Collapse className={"entity-panel"} expandIconPosition={"right"}>
+            <Collapse
+              defaultActiveKey={
+                entity.isOpen ? `${entity._id}-panel` : undefined
+              }
+              onChange={(panelKeys) => {
+                let isOpen = false;
+                if (Array.isArray(panelKeys)) {
+                  if (panelKeys.length > 0) {
+                    isOpen = true;
+                  }
+                }
+
+                debouncedCallback(entity, isOpen);
+              }}
+              className={"entity-panel"}
+              expandIconPosition={"right"}
+            >
               <Collapse.Panel
+                key={`${entity._id}-panel`}
                 header={entity.name}
                 extra={
                   <Dropdown
@@ -318,7 +472,6 @@ export function EntityList(props: EntityListProps) {
                     <SettingOutlined onClick={onClickSettings} />
                   </Dropdown>
                 }
-                key={`${entity._id}-panel`}
               >
                 <div style={{ marginBottom: "1rem" }}>
                   {entity.description.length === 0 &&

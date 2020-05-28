@@ -6,7 +6,7 @@ import { Content, setContentStore } from "./content";
 export type AllDocsEntity = PouchDB.Core.ExistingDocument<DbEntity>;
 export type AllDocsContent = PouchDB.Core.ExistingDocument<Content>;
 
-export const updateStores = (): AppThunk => async (dispatch) => {
+export const updateStores = (): AppThunk => async (dispatch, getState) => {
   // eslint-disable-next-line @typescript-eslint/camelcase
   return db.allDocs({ include_docs: true }).then((docs) => {
     const entities = docs.rows
@@ -50,6 +50,7 @@ export const updateStores = (): AppThunk => async (dispatch) => {
     );
     dispatch(
       setContentStore({
+        ...getState().content,
         content: content as Content[],
       })
     );

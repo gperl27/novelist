@@ -12,7 +12,6 @@ import {
   updateEntities,
 } from "./modules/entities";
 import {
-  Editable,
   EditEntitySettings,
   EntityListContainer,
 } from "./components/EntityEditor";
@@ -22,6 +21,7 @@ import {
   contentFixture,
   selectContent,
   setShowContentRevisions,
+  setShowRenameContentModal,
   updateContent,
 } from "./modules/content";
 import {
@@ -29,10 +29,10 @@ import {
   Divider,
   Dropdown,
   Form,
+  Input,
   Menu,
   Modal,
   PageHeader,
-  Space,
   Tag,
   Timeline,
   Tooltip,
@@ -54,6 +54,8 @@ import {
 // @ts-ignore
 import { initVimMode } from "monaco-vim";
 import { isElementOfType } from "react-dom/test-utils";
+import { ExclamationCircleOutlined } from "@ant-design/icons/lib";
+import { FormInstance } from "antd/lib/form";
 
 interface DirectoryProps {
   onClickNew?: () => void;
@@ -84,15 +86,6 @@ function Directory(props: DirectoryProps) {
     props.onClickSelectContent && props.onClickSelectContent(contentId);
   };
 
-  const onSaveContentName = (content: Content) => (value: string) => {
-    dispatch(
-      updateContent({
-        ...content,
-        name: value,
-      })
-    );
-  };
-
   return (
     <>
       <Menu
@@ -106,7 +99,7 @@ function Directory(props: DirectoryProps) {
                 onClick={onClickSelectContent(cont._id)}
                 key={cont._id}
               >
-                <Editable value={cont.name} onSave={onSaveContentName(cont)} />
+                {cont.name}
               </Menu.Item>
             );
           })}
@@ -456,18 +449,50 @@ function App() {
                     trigger={["click"]}
                     overlay={
                       <Menu>
-                        <Menu.Item>Rename</Menu.Item>
                         <Menu.Item
                           onClick={() => {
-                            if (selectedContent) {
-                              dispatch(setShowContentRevisions(true));
-                            }
+                            dispatch(setShowRenameContentModal(true));
                           }}
                         >
-                          History
+                          Rename
                         </Menu.Item>
+                        {revisionComparer && (
+                          <Menu.Item
+                            onClick={() => {
+                              if (selectedContent) {
+                                dispatch(setShowContentRevisions(true));
+                              }
+                            }}
+                          >
+                            History
+                          </Menu.Item>
+                        )}
                         <Menu.Divider />
-                        <Menu.Item>Delete</Menu.Item>
+                        <Menu.Item
+                          style={{ color: "red" }}
+                          onClick={() => {
+                            Modal.confirm({
+                              title:
+                                "Are you sure you want to delete this content?",
+                              icon: <ExclamationCircleOutlined />,
+                              okText: "Delete",
+                              okType: "danger",
+                              cancelText: "Cancel",
+                              onOk() {
+                                if (selectedContent) {
+                                  dispatch(
+                                    updateContent({
+                                      ...selectedContent,
+                                      _deleted: true,
+                                    })
+                                  );
+                                }
+                              },
+                            });
+                          }}
+                        >
+                          Delete
+                        </Menu.Item>
                       </Menu>
                     }
                   >
@@ -577,6 +602,7 @@ function App() {
         </ReflexElement>
       </ReflexContainer>
       <EditEntitySettingsModal />
+      <RenameContentModal />
     </div>
   );
 }
@@ -623,6 +649,84 @@ const EditEntitySettingsModal = () => {
     >
       <EditEntitySettings form={form} />
     </Modal>
+  );
+};
+
+const RenameContentModal = () => {
+  const dispatch = useDispatch();
+  const [form] = Form.useForm();
+  const onOk = () => {
+    form.submit();
+  };
+  const { showRenameContentModal } = useSelector(
+    (state: RootState) => state.content
+  );
+
+  function hideRenameContentModal() {
+    dispatch(setShowRenameContentModal(false));
+  }
+
+  return (
+    <Modal
+      title={"Rename Content"}
+      onCancel={hideRenameContentModal}
+      visible={showRenameContentModal}
+      onOk={onOk}
+    >
+      <RenameContentForm form={form} />
+    </Modal>
+  );
+};
+
+interface RenameFormProps {
+  form?: FormInstance;
+}
+
+export const RenameContentForm = (props: RenameFormProps) => {
+  const dispatch = useDispatch();
+  const [form] = Form.useForm(props.form);
+  const { selectedContent } = useSelector((state: RootState) => {
+    const { selectedContentId } = state.content;
+    const selectedContent = state.content.content.find(
+      (c) => c._id === selectedContentId
+    );
+
+    return {
+      selectedContent,
+    };
+  });
+
+  useEffect(() => {
+    form.setFieldsValue({
+      name: selectedContent?.name,
+    });
+  }, [selectedContent]);
+
+  async function onSaveContent(values: { [name: string]: any }) {
+    if (selectedContent) {
+      await dispatch(
+        updateContent({
+          ...selectedContent,
+          name: values.name,
+        })
+      );
+      dispatch(setShowRenameContentModal(false));
+    }
+  }
+
+  return (
+    <Form
+      size={"small"}
+      form={form}
+      initialValues={{
+        name: selectedContent?.name ?? "",
+      }}
+      onFinish={onSaveContent}
+    >
+      <Form.Item label={"Name"} name={"name"} rules={[{ required: true }]}>
+        <Input placeholder={"Untitled"} />
+      </Form.Item>
+    </Form>
   );
 };
 

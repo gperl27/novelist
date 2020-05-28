@@ -121,23 +121,27 @@ export const addEntity = (
   parentId?: string
 ): AppThunk => async (dispatch, getState) => {
   const _id = uuidv4();
+  const parent = parentId
+    ? getState().entities.entitiesIndex[parentId]
+    : undefined;
   const dbEntity: Omit<Entity | DbEntity, "_rev"> = {
     ...entity,
     _id,
     description: "",
     isEditing: false,
-    entity: parentId,
+    entity: parent?._id,
     type: "entity",
     entities: [],
+    isOpen: true,
+    isVisible: parent?.isVisible,
   };
 
   const updatedEntities = [dbEntity];
 
-  if (parentId) {
-    const parentEntity = getState().entities.entitiesIndex[parentId];
+  if (parent) {
     updatedEntities.push({
-      ...parentEntity,
-      entities: parentEntity.entities.concat(dbEntity._id),
+      ...parent,
+      entities: parent.entities.concat(dbEntity._id),
     });
   }
 
@@ -165,6 +169,8 @@ export interface Entity extends PersistenceSchema {
   shouldAutoComplete: boolean;
   shouldDeepLink: boolean;
   isEditing: boolean;
+  isOpen?: boolean;
+  isVisible?: boolean;
   _deleted?: boolean;
 }
 
